@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import unittest
 
 from ponte_mcp.salas import (
@@ -134,6 +135,44 @@ class TestConsultaEReservaLivreUS2(unittest.TestCase):
 
     def setUp(self) -> None:
         self.estado = EstadoSalas.carregar()
+
+    def test_reserva_subsegundo_preserva_instantes_apos_converter_offset(self) -> None:
+        inicio = "2026-11-03T12:00:00.100000+00:00"
+        fim = "2026-11-03T12:00:00.900000+00:00"
+        reserva = self.estado.reservar_sala_livre("sala-aquario", inicio, fim, "Doc")
+
+        self.assertEqual(datetime.fromisoformat(reserva.inicio), datetime.fromisoformat(inicio))
+        self.assertEqual(datetime.fromisoformat(reserva.fim), datetime.fromisoformat(fim))
+        self.assertEqual(reserva.inicio, "2026-11-03T09:00:00.100000-03:00")
+        self.assertEqual(reserva.fim, "2026-11-03T09:00:00.900000-03:00")
+
+    def test_conflito_subsegundo_preserva_instantes_e_adjacencia_exata(self) -> None:
+        inicio = "2026-11-03T09:00:00.100000-03:00"
+        fim = "2026-11-03T09:00:00.900000-03:00"
+        reserva = self.estado.reservar_sala_livre("sala-aquario", inicio, fim, "Doc")
+        consulta = self.estado.consultar_disponibilidade("sala-aquario", inicio, fim)
+
+        self.assertFalse(consulta.livre)
+        self.assertEqual(len(consulta.conflitos), 1)
+        conflito = consulta.conflitos[0]
+        self.assertEqual(conflito.id, reserva.reserva)
+        self.assertEqual(datetime.fromisoformat(conflito.inicio), datetime.fromisoformat(inicio))
+        self.assertEqual(datetime.fromisoformat(conflito.fim), datetime.fromisoformat(fim))
+        self.assertEqual((conflito.inicio, conflito.fim), (reserva.inicio, reserva.fim))
+
+        for inicio_adjacente, fim_adjacente in (
+            ("2026-11-03T09:00:00-03:00", inicio),
+            (fim, "2026-11-03T09:00:01-03:00"),
+        ):
+            with self.subTest(inicio=inicio_adjacente):
+                adjacente = self.estado.reservar_sala_livre(
+                    "sala-aquario", inicio_adjacente, fim_adjacente, "Marty"
+                )
+                self.assertTrue(adjacente.reservado)
+        sobreposta = self.estado.consultar_disponibilidade(
+            "sala-aquario", "2026-11-03T09:00:00.899999-03:00", fim
+        )
+        self.assertEqual([c.id for c in sobreposta.conflitos], [reserva.reserva])
 
     def test_consulta_sala_livre_e_ocupada_sem_mutacao(self) -> None:
         disp_livre = self.estado.consultar_disponibilidade(

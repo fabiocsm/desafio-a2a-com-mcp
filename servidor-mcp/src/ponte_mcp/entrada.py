@@ -7,7 +7,10 @@ import json
 import sys
 from typing import Any
 
-from mcp.types import ErrorData, INVALID_PARAMS, JSONRPCError
+from mcp.shared.inbound import ERROR_CODE_HTTP_STATUS, InboundLadderRejection, classify_inbound_request
+from mcp.types import ErrorData, INVALID_PARAMS, JSONRPCError, JSONRPCRequest
+from pydantic import ValidationError
+from starlette.datastructures import Headers
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -28,20 +31,22 @@ def _log_request_stderr(
     print(f"[mcp] {' '.join(parts)}", file=sys.stderr, flush=True)
 
 
-def _build_invalid_params_response(req_id: Any, message: str) -> Response:
-    """Constrói resposta HTTP 400 com JSONRPCError/ErrorData oficiais (-32602)."""
+def _build_error_response(
+    req_id: Any, message: str, *, code: int = INVALID_PARAMS, data: Any = None,
+) -> Response:
+    """Serializa uma rejeição com modelos e status HTTP oficiais do SDK."""
     valid_id: str | int | None = req_id if isinstance(req_id, (str, int)) and not isinstance(req_id, bool) else None
     err = JSONRPCError(
         jsonrpc="2.0",
         id=valid_id,
-        error=ErrorData(code=INVALID_PARAMS, message=message),
+        error=ErrorData(code=code, message=message, data=data),
     )
     payload = err.model_dump(mode="json", by_alias=True, exclude_none=True)
     if valid_id is None:
         payload["id"] = None
     return Response(
         content=json.dumps(payload),
-        status_code=400,
+        status_code=ERROR_CODE_HTTP_STATUS[code],
         media_type="application/json",
     )
 
@@ -93,7 +98,7 @@ class EntradaMCPMiddleware:
 
             if "method" in decoded and "id" in decoded:
                 if not isinstance(meta, Mapping):
-                    resp = _build_invalid_params_response(
+                    resp = _build_error_response(
                         req_id,
                         "params._meta must be an object carrying the required "
                         f"{PROTOCOL_VERSION_META_KEY!r} and {CLIENT_CAPABILITIES_META_KEY!r} envelope keys",
@@ -108,12 +113,27 @@ class EntradaMCPMiddleware:
                 ]
                 if missing or not isinstance(meta.get(CLIENT_CAPABILITIES_META_KEY), Mapping):
                     missing_desc = ", ".join(missing) if missing else CLIENT_CAPABILITIES_META_KEY
-                    resp = _build_invalid_params_response(
+                    resp = _build_error_response(
                         req_id,
                         f"params._meta is missing the required envelope key(s): {missing_desc}",
                     )
                     await resp(scope, receive, send)
                     return
+
+                # O classificador público pressupõe envelope válido. Deixe o
+                # transporte do SDK recusar envelopes malformados sem os alterar.
+                try:
+                    JSONRPCRequest.model_validate(decoded)
+                except ValidationError:
+                    pass
+                else:
+                    classified = classify_inbound_request(decoded, headers=Headers(scope=scope))
+                    if isinstance(classified, InboundLadderRejection):
+                        resp = _build_error_response(
+                            req_id, classified.message, code=classified.code, data=classified.data,
+                        )
+                        await resp(scope, receive, send)
+                        return
 
         body_replayed = False
 

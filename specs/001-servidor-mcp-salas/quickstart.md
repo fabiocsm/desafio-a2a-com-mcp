@@ -93,6 +93,12 @@ não declarar 36 PASS com esta feature isolada.
 
 ## Reprodução limpa, preservação de artefatos e revisão final (T032–T035)
 
+### Revisão da fronteira HTTP — R1-2, R1-3 e R1-4
+
+- `.venv/bin/python -m unittest discover -s servidor-mcp/tests -p 'test_boundary.py' -v`: 6 testes passam após reproduzir falhas na implementação anterior. A matriz HTTP recusa headers ausentes/legados ou divergentes antes de reservar; metadados ausentes mantêm `-32602` e envelopes malformados seguem para rejeição pelo SDK.
+- `classify_inbound_request` público do SDK agora valida os headers após `JSONRPCRequest`; `RequestBodyLimitMiddleware` externo recusa `Content-Length` excedente sem ler e interrompe chunks ao cruzar 4 MiB, antes do parse. `subscriptions=False` mantém tools/resources, desliga subscribe/listChanged e recusa `subscriptions/listen` com `-32601`/HTTP 404 sem stream aberto.
+- `PYTHONPATH=servidor-mcp/tests .venv/bin/python -m unittest test_mcp_http.TestUS3RejeicoesDominioProtocoloELogsHTTP -v`: 3 testes passam, preservando logs, metadados e erros de domínio existentes. As evidências anteriores acima descrevem a execução histórica anterior à revisão.
+
 ### Startup, configuração e ambiente virtual novo (T032, T033)
 
 - `test_startup_a_partir_de_outro_cwd_e_override_host_porta` e `test_valores_padrao_e_rejeicao_segredo_invalido_sem_vazamento` (`TestStartupEConfiguracaoT032`):

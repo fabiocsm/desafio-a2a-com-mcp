@@ -188,8 +188,8 @@ class EstadoSalas:
                 conflitos.append(
                     ConflitoOut(
                         id=r.id,
-                        inicio=r.inicio.isoformat(timespec="seconds"),
-                        fim=r.fim.isoformat(timespec="seconds"),
+                        inicio=r.inicio.isoformat(),
+                        fim=r.fim.isoformat(),
                         responsavel=r.responsavel,
                     )
                 )
@@ -224,8 +224,8 @@ class EstadoSalas:
             raise NotImplementedError("Negociação MRTR sob conflito pertence à feature 002")
 
         novo_id = self.proximo_id_reserva()
-        inicio_iso = dt_inicio.isoformat(timespec="seconds")
-        fim_iso = dt_fim.isoformat(timespec="seconds")
+        inicio_iso = dt_inicio.isoformat()
+        fim_iso = dt_fim.isoformat()
         nova_reserva = Reserva(
             id=novo_id,
             sala=sala_obj.id,

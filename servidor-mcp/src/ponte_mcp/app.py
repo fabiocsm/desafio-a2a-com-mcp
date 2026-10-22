@@ -7,6 +7,7 @@ import os
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.request_state import RequestStateSecurity
+from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE, RequestBodyLimitMiddleware
 from starlette.types import ASGIApp
 
 from ponte_mcp.entrada import EntradaMCPMiddleware
@@ -61,6 +62,7 @@ def criar_mcp_server(
         name=SERVER_NAME,
         version="1.0.0",
         request_state_security=security,
+        subscriptions=False,
     )
 
     @server.tool(
@@ -121,4 +123,7 @@ def criar_asgi_app(
         stateless_http=True,
         host=host,
     )
-    return EntradaMCPMiddleware(sdk_app)
+    return RequestBodyLimitMiddleware(
+        EntradaMCPMiddleware(sdk_app),
+        max_body_size=DEFAULT_MAX_REQUEST_BODY_SIZE,
+    )

@@ -24,9 +24,9 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 ## R03 — Transporte moderno, metadados e logging
 
-**Decision**: Configurar Streamable HTTP stateless e resposta JSON; observar entrada ASGI e fazer guarda restrita de presença dos dois metadados, com rejeição tipada oficial. Delegar coerência dos headers e protocolo ao SDK.
+**Decision**: Configurar Streamable HTTP stateless e resposta JSON; observar entrada ASGI e exigir os dois metadados, com rejeição tipada oficial. Após validar o envelope com JSONRPCRequest, delegar coerência dos headers e protocolo ao classificador público classify_inbound_request do SDK, antes do roteamento legado. Usar RequestBodyLimitMiddleware com o limite padrão externamente à guarda e subscriptions=False no MCPServer.
 
-**Rationale**: O middleware interno do MCP fica depois de fronteiras que podem rejeitar requests; sozinho não registra tudo. A fonte streamable_http_manager.py mostra roteamento legado quando falta o header, então o perfil precisa rejeitar metadados ausentes também nessa entrada.
+**Rationale**: O middleware interno do MCP fica depois de fronteiras que podem rejeitar requests; sozinho não registra tudo. A fonte streamable_http_manager.py mostra roteamento legado quando falta o header, então o perfil precisa rejeitar metadados ausentes e headers contraditórios também nessa entrada. O limitador deve executar antes da observação que lê o corpo; a opção pública de subscriptions evita o stream e as capabilities ativados por padrão pelo SDK.
 
 **Alternatives considered**: Logging apenas nas tools perde falhas de protocolo. Inferir metadata do header viola o enunciado. Reimplementar o dispatcher ou importar APIs privadas do transporte não será permitido.
 

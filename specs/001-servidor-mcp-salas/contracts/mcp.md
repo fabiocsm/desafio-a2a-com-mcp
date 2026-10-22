@@ -51,8 +51,13 @@ FR-009 e data-model.md.
 | Intervalo vazio/invertido | complete/isError: true; Intervalo invalido: fim deve ser posterior a inicio |
 
 Prefixos do SDK são permitidos, mas o trecho exato de domínio deve aparecer.
-A guarda de presença usa modelos/erros do SDK e termina antes das tools; não é
-um segundo dispatcher MCP. Requests válidos são repassados sem modificar o corpo.
+A guarda de presença usa modelos/erros do SDK e, após validar o envelope, chama
+o classificador público `classify_inbound_request` para conferir os headers mesmo
+quando a versão de transporte falta ou é legada. Não há segundo dispatcher MCP;
+requests válidos são repassados sem modificar o corpo. O limitador público
+`RequestBodyLimitMiddleware` envolve a guarda antes de qualquer bufferização,
+usando o limite padrão do SDK. `subscriptions=False` mantém tools/resources
+disponíveis sem anunciar nem atender subscriptions/listen.
 
 ## Observabilidade e evolução
 
