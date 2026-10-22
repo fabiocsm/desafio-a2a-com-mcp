@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import os
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.request_state import RequestStateSecurity
 from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE, RequestBodyLimitMiddleware
+from mcp.types import InputRequiredResult
 from starlette.types import ASGIApp
 
 from ponte_mcp.entrada import EntradaMCPMiddleware
 from ponte_mcp.modelos import Disponibilidade, ListaDeSalas, ReservaOut
+from ponte_mcp.mrtr import executar_reservar_sala
 from ponte_mcp.salas import ESTADO_PROCESSO, ErroDominio, EstadoSalas
 
 SERVER_NAME = "ponte-salas"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7301
-DEFAULT_STATE_TTL = 600.0
+DEFAULT_STATE_TTL = 600
 
 
 class ErroConfiguracaoSegredo(RuntimeError):
@@ -86,13 +88,22 @@ def criar_mcp_server(
         name="reservar_sala",
         description="Reserva uma sala. Se o intervalo estiver ocupado, pergunta qual alternativa usar.",
     )
-    def reservar_sala(sala: str, inicio: str, fim: str, responsavel: str) -> ReservaOut:
+    def reservar_sala(
+        sala: str,
+        inicio: str,
+        fim: str,
+        responsavel: str,
+        ctx: Context,
+    ) -> ReservaOut | InputRequiredResult:
+        """Executa reserva direta, emissão de pergunta MRTR ou retomada (accept/decline/cancel)."""
         try:
-            return dominio.reservar_sala_livre(
+            return executar_reservar_sala(
+                dominio=dominio,
                 sala=sala,
                 inicio=inicio,
                 fim=fim,
                 responsavel=responsavel,
+                ctx=ctx,
             )
         except (ErroDominio, ValueError) as err:
             raise ToolError(str(err)) from err

@@ -5,10 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 import unittest
 
+from ponte_mcp.modelos import Politica, Reserva, SalaOut
 from ponte_mcp.salas import (
     ERRO_DURACAO_MSG,
     ERRO_INTERVALO_MSG,
     ERRO_JANELA_MSG,
+    ERRO_SEM_ALTERNATIVA_MSG,
     ErroDominio,
     EstadoSalas,
     OFFSET_SAO_PAULO,
@@ -425,6 +427,172 @@ class TestMatrizRejeicoesUS3(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx_fr:
                 self.estado.reservar_sala_livre("sala-aquario", ini_inv, fim_inv, "Doc")
             self.assertNotIsInstance(ctx_fr.exception, ErroDominio)
+
+
+class TestAlternativasEConfirmacaoUS1T008(unittest.TestCase):
+    """Testes unitários de US1 (T008): seleção de alternativas, ordenação, limite de 3 e confirmação."""
+
+    def setUp(self) -> None:
+        self.estado = EstadoSalas.carregar()
+
+    def test_cenario_original_sala_garagem_retorna_fusca_e_mirante_sem_mutar(self) -> None:
+        alternativas = self.estado.selecionar_alternativas(
+            "sala-garagem",
+            "2026-11-03T14:00:00-03:00",
+            "2026-11-03T15:00:00-03:00",
+        )
+        self.assertEqual(alternativas, ["sala-fusca", "sala-mirante"])
+
+        # Nenhuma reserva foi criada nas alternativas apenas por selecioná-las
+        for alt in ("sala-fusca", "sala-mirante"):
+            disp = self.estado.consultar_disponibilidade(
+                alt,
+                "2026-11-03T14:00:00-03:00",
+                "2026-11-03T15:00:00-03:00",
+            )
+            self.assertTrue(disp.livre)
+
+    def test_desempate_alfabetico_exclusao_ocupada_e_limite_de_tres(self) -> None:
+        # Ao ocupar sala-aquario (cap 4) das 09h às 10h, há 4 salas livres com cap >= 4:
+        # sala-porao (6), sala-fusca (12), sala-garagem (12), sala-mirante (20).
+        # Deve ordenar por (capacidade, id) -> porao (6), fusca (12), garagem (12) e cortar mirante (4ª).
+        self.estado.reservar_sala_livre(
+            "sala-aquario",
+            "2026-11-03T09:00:00-03:00",
+            "2026-11-03T10:00:00-03:00",
+            "Doc",
+        )
+        alternativas = self.estado.selecionar_alternativas(
+            "sala-aquario",
+            "2026-11-03T09:00:00-03:00",
+            "2026-11-03T10:00:00-03:00",
+        )
+        self.assertEqual(alternativas, ["sala-porao", "sala-fusca", "sala-garagem"])
+
+        # Fixture sintética em memória com 5 salas de mesma capacidade para validar desempate alfabético puro e corte em 3
+        salas_sinteticas = [
+            SalaOut(id="sala-z", nome="Z", capacidade=10, recursos=[]),
+            SalaOut(id="sala-c", nome="C", capacidade=10, recursos=[]),
+            SalaOut(id="sala-a", nome="A", capacidade=10, recursos=[]),
+            SalaOut(id="sala-b", nome="B", capacidade=10, recursos=[]),
+            SalaOut(id="sala-solicitada", nome="S", capacidade=10, recursos=[]),
+        ]
+        reserva_conflito = Reserva(
+            id="res-0001",
+            sala="sala-solicitada",
+            inicio=datetime.fromisoformat("2026-11-03T10:00:00-03:00"),
+            fim=datetime.fromisoformat("2026-11-03T11:00:00-03:00"),
+            responsavel="Marty",
+        )
+        estado_sintetico = EstadoSalas(
+            salas=salas_sinteticas,
+            reservas=[reserva_conflito],
+            politica=Politica(texto="versao: 2026-11-01\n", versao="2026-11-01"),
+        )
+        alts_sinteticas = estado_sintetico.selecionar_alternativas(
+            "sala-solicitada",
+            "2026-11-03T10:00:00-03:00",
+            "2026-11-03T11:00:00-03:00",
+        )
+        self.assertEqual(alts_sinteticas, ["sala-a", "sala-b", "sala-c"])
+
+    def test_adjacencia_e_offsets_equivalentes_na_selecao_e_sem_alternativas(self) -> None:
+        # Em 16h-17h (-03:00), sala-fusca (12) está ocupada por Jennifer (res-0002).
+        # Em UTC: 19h-20hZ. Alternativas elegíveis (cap >= 12): sala-garagem (12) e sala-mirante (20).
+        alts_utc = self.estado.selecionar_alternativas(
+            "sala-fusca",
+            "2026-11-03T19:00:00Z",
+            "2026-11-03T20:00:00+00:00",
+        )
+        self.assertEqual(alts_utc, ["sala-garagem", "sala-mirante"])
+
+        # Reserva em sala-garagem no horário adjacente 15h-16h não exclui sala-garagem de 16h-17h
+        self.estado.reservar_sala_livre(
+            "sala-garagem",
+            "2026-11-03T15:00:00-03:00",
+            "2026-11-03T16:00:00-03:00",
+            "Biff",
+        )
+        alts_adj = self.estado.selecionar_alternativas(
+            "sala-fusca",
+            "2026-11-03T16:00:00-03:00",
+            "2026-11-03T17:00:00-03:00",
+        )
+        self.assertEqual(alts_adj, ["sala-garagem", "sala-mirante"])
+
+        # Sala de capacidade máxima (sala-mirante, 20) ocupada -> nenhuma alternativa com cap >= 20
+        self.estado.reservar_sala_livre(
+            "sala-mirante",
+            "2026-11-03T11:00:00-03:00",
+            "2026-11-03T12:00:00-03:00",
+            "Doc",
+        )
+        with self.assertRaises(ErroDominio) as ctx_sem:
+            self.estado.selecionar_alternativas(
+                "sala-mirante",
+                "2026-11-03T11:00:00-03:00",
+                "2026-11-03T12:00:00-03:00",
+            )
+        self.assertEqual(str(ctx_sem.exception), ERRO_SEM_ALTERNATIVA_MSG)
+
+    def test_confirmar_alternativa_sucesso_e_rejeicao_quando_ocupada_apos_oferta(self) -> None:
+        alts = self.estado.selecionar_alternativas(
+            "sala-garagem",
+            "2026-11-03T14:00:00-03:00",
+            "2026-11-03T15:00:00-03:00",
+        )
+        self.assertEqual(alts, ["sala-fusca", "sala-mirante"])
+
+        # Ocupar sala-fusca entre a oferta e a confirmação
+        self.estado.reservar_sala_livre(
+            "sala-fusca",
+            "2026-11-03T14:00:00-03:00",
+            "2026-11-03T15:00:00-03:00",
+            "Outro",
+        )
+        conflitos_antes = self.estado.consultar_disponibilidade(
+            "sala-fusca",
+            "2026-11-03T14:00:00-03:00",
+            "2026-11-03T15:00:00-03:00",
+        ).conflitos
+        self.assertEqual(len(conflitos_antes), 1)
+
+        with self.assertRaises(ErroDominio):
+            self.estado.confirmar_reserva_alternativa(
+                sala_original="sala-garagem",
+                sala_escolhida="sala-fusca",
+                inicio="2026-11-03T14:00:00-03:00",
+                fim="2026-11-03T15:00:00-03:00",
+                responsavel="Marty",
+                alternativas_oferecidas=alts,
+                politica="2026-11-01",
+            )
+
+        # Nenhuma reserva duplicada/sobreposta criada em sala-fusca
+        conflitos_depois = self.estado.consultar_disponibilidade(
+            "sala-fusca",
+            "2026-11-03T14:00:00-03:00",
+            "2026-11-03T15:00:00-03:00",
+        ).conflitos
+        self.assertEqual(conflitos_depois, conflitos_antes)
+
+        # Confirmar sala-mirante (ainda livre) preserva horário, responsável e política selados
+        confirmada = self.estado.confirmar_reserva_alternativa(
+            sala_original="sala-garagem",
+            sala_escolhida="sala-mirante",
+            inicio="2026-11-03T14:00:00-03:00",
+            fim="2026-11-03T15:00:00-03:00",
+            responsavel="Marty",
+            alternativas_oferecidas=alts,
+            politica="2026-11-01",
+        )
+        self.assertTrue(confirmada.reservado)
+        self.assertEqual(confirmada.sala, "sala-mirante")
+        self.assertEqual(confirmada.inicio, "2026-11-03T14:00:00-03:00")
+        self.assertEqual(confirmada.fim, "2026-11-03T15:00:00-03:00")
+        self.assertEqual(confirmada.responsavel, "Marty")
+        self.assertEqual(confirmada.politica, "2026-11-01")
+        self.assertIsNone(confirmada.motivo)
 
 
 if __name__ == "__main__":

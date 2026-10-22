@@ -221,14 +221,99 @@ class EstadoSalas:
         sala_obj, dt_inicio, dt_fim = self.validar_sala_e_intervalo(sala, inicio, fim)
         conflitos = self.calcular_conflitos(sala_obj.id, dt_inicio, dt_fim)
         if conflitos:
-            raise NotImplementedError("Negociação MRTR sob conflito pertence à feature 002")
+            raise ErroDominio(ERRO_SEM_ALTERNATIVA_MSG)
 
+        return self._gravar_reserva(
+            sala_id=sala_obj.id,
+            dt_inicio=dt_inicio,
+            dt_fim=dt_fim,
+            responsavel=responsavel,
+            politica=self._politica.versao,
+        )
+
+    def selecionar_alternativas(
+        self,
+        sala: str,
+        inicio: str,
+        fim: str,
+    ) -> list[str]:
+        """Seleciona até três salas livres com capacidade >= solicitada ordenadas por (capacidade, id)."""
+        sala_obj, dt_inicio, dt_fim = self.validar_sala_e_intervalo(sala, inicio, fim)
+        elegiveis = [
+            candidata
+            for candidata in self._salas
+            if candidata.id != sala_obj.id
+            and candidata.capacidade >= sala_obj.capacidade
+            and len(self.calcular_conflitos(candidata.id, dt_inicio, dt_fim)) == 0
+        ]
+        elegiveis.sort(key=lambda s: (s.capacidade, s.id))
+        opcoes = [s.id for s in elegiveis[:3]]
+        if not opcoes:
+            raise ErroDominio(ERRO_SEM_ALTERNATIVA_MSG)
+        return opcoes
+
+    def confirmar_reserva_alternativa(
+        self,
+        *,
+        sala_original: str,
+        sala_escolhida: str,
+        inicio: str,
+        fim: str,
+        responsavel: str,
+        alternativas_oferecidas: list[str] | tuple[str, ...] | None = None,
+        politica: str | None = None,
+    ) -> ReservaOut:
+        """Revalida pedido original e alternativa escolhida antes de gravar a reserva."""
+        if alternativas_oferecidas is not None and sala_escolhida not in alternativas_oferecidas:
+            raise ErroDominio(
+                f"Sala escolhida fora das alternativas oferecidas: {sala_escolhida}"
+            )
+
+        sala_orig_obj, dt_inicio, dt_fim = self.validar_sala_e_intervalo(
+            sala_original,
+            inicio,
+            fim,
+        )
+        sala_esc_obj, _, _ = self.validar_sala_e_intervalo(
+            sala_escolhida,
+            inicio,
+            fim,
+        )
+        if sala_esc_obj.capacidade < sala_orig_obj.capacidade:
+            raise ErroDominio(
+                f"Capacidade da alternativa ({sala_esc_obj.capacidade}) inferior à solicitada ({sala_orig_obj.capacidade})"
+            )
+
+        conflitos = self.calcular_conflitos(sala_esc_obj.id, dt_inicio, dt_fim)
+        if conflitos:
+            raise ErroDominio(
+                f"Alternativa indisponivel no momento da confirmacao: {sala_esc_obj.id}"
+            )
+
+        return self._gravar_reserva(
+            sala_id=sala_esc_obj.id,
+            dt_inicio=dt_inicio,
+            dt_fim=dt_fim,
+            responsavel=responsavel,
+            politica=politica if politica is not None else self._politica.versao,
+        )
+
+    def _gravar_reserva(
+        self,
+        *,
+        sala_id: str,
+        dt_inicio: datetime,
+        dt_fim: datetime,
+        responsavel: str,
+        politica: str,
+    ) -> ReservaOut:
+        """Persiste uma nova reserva em memória com id único e retorna ReservaOut completo."""
         novo_id = self.proximo_id_reserva()
         inicio_iso = dt_inicio.isoformat()
         fim_iso = dt_fim.isoformat()
         nova_reserva = Reserva(
             id=novo_id,
-            sala=sala_obj.id,
+            sala=sala_id,
             inicio=dt_inicio,
             fim=dt_fim,
             responsavel=responsavel,
@@ -237,11 +322,11 @@ class EstadoSalas:
         return ReservaOut(
             reserva=novo_id,
             reservado=True,
-            sala=sala_obj.id,
+            sala=sala_id,
             inicio=inicio_iso,
             fim=fim_iso,
             responsavel=responsavel,
-            politica=self._politica.versao,
+            politica=politica,
             motivo=None,
         )
 
