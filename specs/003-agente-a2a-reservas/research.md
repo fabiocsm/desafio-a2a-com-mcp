@@ -30,6 +30,18 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 **Alternatives considered**: Client.call_tool fecha MRTR automaticamente. Requests HTTP artesanais eliminariam o benefício do SDK. A API desta versão anuncia também url; documentar essa limitação em vez de alterar atributos privados.
 
+**Gate FR-008 — reprovado no design atual**: O anúncio adicional não comprova a
+forma exata exigida pela spec e constituição. Na revisão de tarefas em 2026-10-22,
+a leitura do código oficial da tag v2.3.0 confirmou que `_build_capabilities`
+constrói `ElicitationCapability(form=..., url=...)` quando há callback; `adopt`
+instala esse anúncio, e `_make_modern_stamp` grava as capabilities em cada request.
+Esses símbolos são evidência somente leitura, não pontos de extensão autorizados.
+Fonte: [ClientSession v2.3.0](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/client/session.py#L571-L605).
+T005/T006/T031 exigem comparação do wire instalado com o contrato e solução por
+API pública compatível; se não for possível, registrar a limitação no README da
+005 e manter o requisito reprovado. Não afirmar que o suporte a form, sozinho,
+resolve a divergência, nem modificar o SDK/constituição para ocultá-la.
+
 ## R04 — Estado, parsing e rastreamento
 
 **Decision**: Task pública somente com identidade, estado, histórico e artifact; parser por gramática fixa; contexto de trace explícito por Task/chamada; política extraída do resource.
@@ -65,7 +77,8 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 ## Resultado da pesquisa
 
-Decisões de design resolvidas, sem esclarecimentos bloqueantes. Os pins foram
+Decisões de design registradas, com pendência bloqueante de conformidade em FR-008
+e tarefas explícitas para verificá-la/resolvê-la. Os pins foram
 verificados em metadados publicados; a combinação MCP/A2A/Starlette/Uvicorn/SSE/Pydantic teve
 resolução pip dry-run bem-sucedida direcionada a Python 3.12, sem instalação no
 projeto. Isso demonstra resolução de dependências, não execução da aplicação nem

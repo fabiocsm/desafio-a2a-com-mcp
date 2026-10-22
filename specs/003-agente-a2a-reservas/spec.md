@@ -67,6 +67,18 @@ Como responsável pela integração, quero comprovar que o agente usa o serviço
 - Um input_required não é sucesso nem erro de domínio: seu tratamento completo é responsabilidade da spec 004, sem callback que escolha pelo cliente.
 - O agente não deve criar horários alternativos, trocar sala ou interpretar linguagem natural.
 
+### Validação automatizada dos cenários
+
+Automatizar os cenários de aceite com testes de contrato e integração entre os
+dois processos HTTP reais, além de testes de parser e transições de Task. Cobrir
+card, reserva livre, GetTask durante execução e após conclusão/falha, mensagens
+exatas de domínio, terminalidade, descoberta, origem da política, metadados/headers
+em cada request e isolamento do trace entre Tasks. Fixtures controladas podem
+variar a política sem editar os arquivos protegidos. Testar o retorno MCP
+input_required cru e ausência de callback automático, reservando a pausa/retomada
+A2A para 004. Esses testes verificam requisitos existentes e não substituem o
+validador integral nem os critérios manuais da entrega.
+
 ## Requirements *(mandatory)*
 
 ### Functional Requirements

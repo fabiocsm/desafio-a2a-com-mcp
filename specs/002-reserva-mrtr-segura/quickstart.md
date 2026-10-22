@@ -23,6 +23,7 @@ Não gere outra chave entre a pergunta e o retry.
 No segundo terminal, usando a raiz do repositório:
 
 ```bash
+. .venv/bin/activate
 python -c 'import json; print(json.dumps(json.load(open("exemplos/wire/03-tools-call-conflito-input-required.json"))["request"]["body"]))' |
 curl -sS http://127.0.0.1:7301/mcp   -H 'Content-Type: application/json'   -H 'Accept: application/json, text/event-stream'   -H 'MCP-Protocol-Version: 2026-07-28'   -H 'Mcp-Method: tools/call'   -H 'Mcp-Name: reservar_sala'   --data-binary @-
 ```
@@ -44,6 +45,18 @@ Em cenários separados, testar token adulterado, expirado, argumentos divergente
 form ausente, elicitation genérica e url-only. Esperado: -32602 nos três primeiros
 e -32021/HTTP 400 para ausência de form. Use relógio controlado no teste de expiração,
 mantendo o TTL de produção em 600s. Testar decline e cancel sem criação de reserva.
+
+Executar todas as linhas da matriz de aceite de segurança/continuação em
+[spec.md](spec.md): alteração/truncamento do token, expiração antes/depois de
+restart, cada argumento divergente, campos de retry incompletos, mapa vazio,
+chave divergente/entrada adicional e payload incompatível por fixture interna.
+Rejeições de protocolo devem ser -32602, sem mutação nem fallback para pedido
+inicial. O controle de relógio fica no processo de testes (inclusive no worker
+de teste usado para expiração após restart), nunca em endpoint de produção.
+
+Gerar também uma pergunta, ocupar a alternativa por outra reserva válida e então
+confirmá-la: esperado complete/isError: true, sem nova pergunta e sem sobreposição;
+não comparar texto específico para esse erro adicional.
 
 Reiniciar a base entre cenários que escrevem reservas; para restart com estado
 pendente, reiniciar somente o MCP mantendo a chave. Conferir ids diferentes nos logs.

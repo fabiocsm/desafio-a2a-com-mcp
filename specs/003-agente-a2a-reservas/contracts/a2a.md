@@ -33,18 +33,25 @@ GetTask retorna Task diretamente no result na implementação oficial; essa form
 | complete, reserva válida e sem isError | Task COMPLETED com artifact reserva |
 | complete, isError true | Task FAILED com texto exato da tool visível no histórico |
 | input_required | encaminhado cru para integração da 004, sem resposta automática ou falsa conclusão |
-| erro técnico/protocolo | erro/falha sem artifact de sucesso e sem conteúdo privado |
+| erro técnico/protocolo depois de criar Task | Task FAILED, mensagem `Falha ao executar pedido no servidor MCP`, sem artifact de sucesso, exceção bruta ou corpo MCP privado |
 
 Enviar mensagem para Task COMPLETED/FAILED gera erro antes de chamar MCP.
 GetTask de id desconhecido segue o erro TaskNotFound do SDK.
+Entrada malformada é rejeitada com erro de parâmetro do SDK antes de criar Task
+ou enviar reserva. Falha técnica não pode deixar uma Task já criada indefinidamente
+em WORKING. Essas falhas não alteram as mensagens exatas de domínio exigidas.
 
 ## Host MCP
 
 Descobrir tools/list antes do primeiro tools/call e ler politica://uso; toda
 operação carrega os metadados e headers do contrato MCP. O cliente deve anunciar
-form, usar versão fixa moderna e session.call_tool com allow_input_required=True.
-O anúncio extra url dessa versão do SDK é limitação documentada; o callback
-defensivo nunca responde a perguntas, e o produto não oferece fluxo de elicitation URL.
+`{"elicitation": {"form": {}}}`, usar versão fixa moderna e session.call_tool
+com allow_input_required=True. O anúncio extra url dessa versão do SDK é uma
+divergência documentada, não equivalência ao contrato exato. T005/T006/T031 mantêm
+o gate FR-008 reprovado enquanto não houver solução por API pública compatível e
+teste de wire aprovado. O callback defensivo nunca responde a perguntas, e o
+produto não oferece fluxo de elicitation URL. Não modificar atributos privados,
+reescrever protocolo ou relaxar requisitos para acomodar o pin.
 
 Capturar traceparent no pedido A2A e passar meta explícita em cada operação MCP
 associada à Task; o trace-id não pode mudar. Sem traceparent, não herdar o de outra Task.

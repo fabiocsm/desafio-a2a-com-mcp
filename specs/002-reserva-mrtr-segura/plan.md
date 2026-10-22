@@ -16,7 +16,8 @@ Dependências: 001-servidor-mcp-salas; mantém seus schemas, erros, domínio e t
 
 Phase 0 consolidada em [research.md](research.md); Phase 1 detalhada em
 [data-model.md](data-model.md), [contrato](contracts/mrtr.md) e
-[quickstart.md](quickstart.md). Este plano encerra o design; não cria código nem tasks.md.
+[quickstart.md](quickstart.md). A decomposição executável está em [tasks.md](tasks.md);
+os artefatos documentais não implementam a aplicação.
 
 ## Technical Context
 
@@ -70,6 +71,7 @@ specs/002-reserva-mrtr-segura/
 ├── research.md
 ├── data-model.md
 ├── quickstart.md
+├── tasks.md
 ├── contracts/mrtr.md
 └── checklists/requirements.md
 ```
@@ -89,21 +91,22 @@ servidor-mcp/
 │   ├── salas.py        # alternativas e reserva da opção validada
 │   └── mrtr.py         # pergunta, capability e retomada via contexto SDK
 └── tests/
+    ├── test_salas.py   # existente da 001, acrescentar matriz de alternativas
     └── test_mrtr.py    # HTTP, adulteração, relógio e subprocesso/restart
 ```
 
 **Structure Decision**: Adicionar somente o módulo MRTR e o modelo do payload ao servidor existente. A proteção criptográfica e os erros de estado continuam nas fronteiras oficiais do SDK; não criar store de negociações, endpoint de sessão ou serviço de criptografia próprio.
 
-### Sequência de implementação a detalhar em tasks.md
+### Sequência executável em tasks.md
 
-1. Adicionar payload versionado com pedido original completo, alternativas ordenadas, chave da pergunta e versão da política, sem qualquer referência a um objeto em memória.
-2. Filtrar salas livres com capacidade suficiente usando a mesma lógica de disponibilidade; ordenar por (capacidade, id) e limitar a três.
-3. Quando houver conflito sem opções, devolver complete/isError com a mensagem exata. Havendo opções, verificar elicitation.form do request atual antes de emitir a pergunta.
-4. Montar InputRequiredResult com uma entrada ElicitRequest em mode form e request_state contendo o payload serializado. Deixar RequestStateBoundary aplicar as claims, AES-GCM e expiração.
-5. Configurar RequestStateSecurity(keys=[secret_bytes], ttl=600) no MCPServer e manter o nome do servidor constante entre reinícios; não usar o default ephemeral.
-6. No retry, ler ctx.input_responses e ctx.request_state; recuperar a chave e o pedido original do payload verificado. Accept seleciona somente uma alternativa oferecida; decline/cancel não grava reserva.
-7. Usar a rejeição nativa do SDK para argumentos divergentes e estado adulterado/expirado; não converter esses casos em isError de domínio.
-8. Testar form ausente/genérico/url-only, enum/const, limite/ordem, ausência de alternativas, aceite/recusa, adulteração, expiração e restart em subprocesso com a mesma chave.
+1. Verificar os gates da implementação 001 e preparar consumidor HTTP direto; nenhuma aplicação foi implementada por este planejamento.
+2. Na fundação, adicionar payload versionado autocontido e configurar RequestStateSecurity(keys=[secret_bytes], ttl=600), com nome ponte-salas estável e sem fallback ephemeral. A proteção deve estar ativa antes da primeira emissão.
+3. Na US1, filtrar salas livres com capacidade suficiente, ordenar por (capacidade, id) e limitar a três; sem opções, devolver complete/isError com a mensagem exata.
+4. Montar InputRequiredResult com uma ElicitRequest form e payload serializado, após conferir form no request atual; o SDK aplica claims, AES-GCM e expiração. Não aguardar callback.
+5. No retry, distinguir chamada inicial de continuação pela presença dos campos: ambos ausentes indicam inicial; presença de qualquer um exige requestState e inputResponses válidos. Rejeitar -32602 antes de mutação se faltar um, se o mapa estiver vazio ou se suas chaves não forem exatamente a elicitation_key selada. Ler ctx.request_state já verificado e ctx.input_responses; accept seleciona uma opção oferecida e revalida disponibilidade antes de gravar.
+6. Na US2, exercitar a matriz de segurança da spec com erros nativos do SDK para integridade, expiração e argumentos divergentes; validar payload e correlação no handler com tipos de erro públicos quando necessário. Não converter erros de protocolo em isError de domínio; demonstrar restart real sem store de continuação.
+7. Na US3, concluir a matriz negativa form ausente/genérico/url-only, opção única e decline/cancel sem gravação e sem isError verdadeiro.
+8. Executar regressão/reprodução e registrar evidências. As dependências por tarefa e os três grupos possíveis de paralelismo estão em tasks.md.
 
 ### Validação e rastreabilidade
 
@@ -123,16 +126,16 @@ Os casos abaixo são validações planejadas, não resultados de testes já exec
 | FR-006 | AES-GCM oficial, payload e expiração de 600 segundos. |
 | FR-007 | Secret hexadecimal de >=32 bytes, obrigatório no ambiente. |
 | FR-008 | Teste real de restart MCP sem store de continuação. |
-| FR-009 | Consumidor usa id novo e campos params da retomada. |
+| FR-009 | Consumidor usa id novo e campos params; continuação incompleta ou chave divergente é rejeitada sem mutação. |
 | FR-010 | Integridade e expiração rejeitadas antes de reservar. |
 | FR-011 | Digest de argumentos rejeita adulteração. |
-| FR-012 | Accept preserva pedido e confirma a opção oferecida. |
+| FR-012 | Accept preserva pedido, confirma opção ainda livre e rejeita ocupação posterior com complete/isError sem nova negociação. |
 | FR-013 | Decline/cancel completam sem erro e sem gravação. |
 | FR-014 | Nenhuma associação a Task ou interpretação do token pelo cliente. |
 
 ### Riscos e limites
 
-Trocar a chave ou o nome/audience entre emissão e retry invalida o estado; manter ambos constantes. TTL não deve ser renovado ao reiniciar. Um estado criptografado ainda deve ser opaco para o agente. A indisponibilidade surgida depois da oferta não pode produzir reserva sobreposta: revalidar a alternativa no commit; como o enunciado não fixa a mensagem desse caso, reutilizar erro de domínio aplicável sem inventar fluxo de negociação adicional.
+Trocar a chave ou o nome/audience entre emissão e retry invalida o estado; manter ambos constantes. TTL não deve ser renovado ao reiniciar. Um estado criptografado ainda deve ser opaco para o agente. A indisponibilidade surgida depois da oferta deve terminar em complete/isError: true, sem nova pergunta e sem gravação. O texto desse erro adicional não é fixado pelo desafio; não substituir nenhuma das mensagens obrigatórias para as condições já normatizadas. A matriz de aceite da spec e T008/T009/T013 tornam o caso verificável sem exigir mensagem artificialmente exata.
 
 ## Complexity Tracking
 

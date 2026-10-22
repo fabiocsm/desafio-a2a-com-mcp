@@ -28,6 +28,9 @@ ctx.request_state contém o payload, não um token para descriptografar novament
 - InputRequest: chave variável do servidor; método elicitation/create; mode form;
   schema plano com sala string obrigatória, enum ordenado ou const com uma opção.
 - InputResponse: mesma chave; action accept com content.sala, ou decline/cancel.
+- Continuação: requestState e inputResponses obrigatoriamente juntos; mapa de
+  respostas com exatamente a elicitation_key selada. Campo incompleto, mapa vazio,
+  chave divergente ou entrada adicional resulta em -32602 sem mutação.
 - O retry mantém original_arguments; a sala escolhida viaja somente no content
   da resposta. Isso preserva o digest usado pelo SDK.
 
@@ -39,8 +42,10 @@ ctx.request_state contém o payload, não um token para descriptografar novament
 | Conflito com opções e capability | chamada inicial | input_required, nenhuma reserva |
 | Conflito sem opção | chamada inicial | complete/isError, nenhuma reserva |
 | Estado válido e accept válido | retry | revalidar opção e criar reserva |
+| Opção oferecida ocupada após emissão | retry accept | complete/isError: true, sem nova pergunta e sem gravação; texto não normatizado |
 | Estado válido e decline/cancel | retry | complete, reservado false, motivo; sem gravação |
 | Estado inválido/expirado ou argumentos divergentes | retry | -32602 antes da tool; sem gravação |
+| Continuação incompleta, correlação inválida ou payload incompatível | retry | -32602 na validação SDK/handler, antes de qualquer mutação |
 
 Estados acima descrevem requests independentes, não uma máquina de sessão guardada
 pelo servidor. A validade do token pode sobreviver ao processo; as reservas transitórias não.

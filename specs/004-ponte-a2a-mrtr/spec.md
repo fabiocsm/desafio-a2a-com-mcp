@@ -42,6 +42,7 @@ Como cliente, quero corrigir uma opção inválida ou recusar as salas propostas
 2. **Given** uma Task pausada, **When** o cliente envia escolha=recusar, **Then** o agente envia decline na continuação MCP e termina a Task em CANCELED, sem criar reserva
 3. **Given** uma Task COMPLETED, CANCELED ou FAILED, **When** o cliente envia qualquer continuação dirigida a ela, **Then** recebe erro e o estado permanece terminal sem novo pedido de reserva
 4. **Given** uma retomada que recebe erro de execução da tool, **When** o agente trata o resultado, **Then** a Task termina FAILED preservando a mensagem original no histórico
+5. **Given** uma retomada que recebe erro JSON-RPC, inclusive estado expirado, ou falha HTTP/rede, **When** o agente trata a falha técnica, **Then** a mesma Task termina FAILED sem artifact de sucesso, limpa a continuação privada e apresenta diagnóstico sem requestState ou segredo
 
 ---
 
@@ -68,7 +69,7 @@ Como cliente com mais de uma reunião em negociação, quero continuar cada pedi
 - Sem alternativas, o MCP devolve erro de execução: a Task termina FAILED, sem inventar pergunta ou alternativa local.
 - A chave de inputRequests varia entre SDKs e execuções; o agente deve preservar a chave efetivamente recebida.
 - Se o estado expirar enquanto o usuário decide, o servidor rejeita a retomada; o agente não pode reconstruir ou renovar o estado por conta própria.
-- Para erro JSON-RPC na retomada, a operação não pode ser apresentada como concluída nem produzir artifact de sucesso; a política de apresentação de falha técnica será detalhada no planejamento.
+- Erro JSON-RPC, inclusive estado expirado, ou falha HTTP/rede na retomada termina a mesma Task em TASK_STATE_FAILED, sem artifact de sucesso e com diagnóstico técnico sem requestState ou segredo. A continuação privada é removida; o agente não tenta renová-la ou reconstruí-la.
 - Um restart do agente não precisa preservar Tasks; o requisito de retomada após restart aplica-se ao servidor MCP com o agente/consumidor preservando a continuação.
 
 ## Requirements *(mandatory)*
@@ -85,7 +86,7 @@ Como cliente com mais de uma reunião em negociação, quero continuar cada pedi
 - **FR-008**: O conteúdo da resposta accept DEVE informar a sala escolhida; a decisão de reservar e as validações continuam exclusivamente no servidor MCP.
 - **FR-009**: Após resultado de reserva com sucesso, a mesma Task DEVE terminar em TASK_STATE_COMPLETED com artifact reserva contendo o JSON e a política conforme a spec 003.
 - **FR-010**: `escolha=recusar` DEVE ser traduzida em action decline na continuação MCP e concluir a Task em TASK_STATE_CANCELED após a conclusão sem reserva.
-- **FR-011**: Resultado isError: true DEVE terminar a Task em TASK_STATE_FAILED com a mensagem exata da tool visível no histórico; falha de retomada NÃO DEVE gerar confirmação indevida.
+- **FR-011**: Resultado isError: true DEVE terminar a Task em TASK_STATE_FAILED com a mensagem exata da tool visível no histórico. Erro JSON-RPC, inclusive estado expirado, ou falha HTTP/rede na retomada também DEVE terminar a mesma Task em TASK_STATE_FAILED, limpar a continuação privada e apresentar diagnóstico técnico sem requestState ou segredo, sem gerar artifact de sucesso nem renovar/reconstruir o estado. Não se exige código ou texto exato novo para esse diagnóstico técnico.
 - **FR-012**: COMPLETED, CANCELED e FAILED DEVEM ser definitivos: SendMessage dirigido a qualquer Task terminal DEVE ser recusado com erro sem novo tools/call de reserva.
 - **FR-013**: Duas Tasks pausadas simultaneamente DEVEM poder ser retomadas em qualquer ordem preservando seus estados, horários, responsáveis e reservas distintos.
 - **FR-014**: Dois pedidos iguais sem mudança na disponibilidade entre eles DEVEM produzir mensagens de pausa iguais byte a byte, mantendo identidades próprias.

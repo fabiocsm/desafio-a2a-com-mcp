@@ -7,7 +7,7 @@
 | TaskRecord | public_task: Task Protobuf, traceparent_original: str opcional, pending: PendingContinuation opcional |
 | PendingContinuation | tool_name, original_arguments, elicitation_key, ordered_alternatives, pause_text, request_state |
 | OriginalArguments | sala, inicio, fim, responsavel exatamente como usados na chamada original |
-| ClientDecision | tipo escolha/recusa e sala escolhida opcional |
+| ClientDecision | tipo escolha/recusa; sala escolhida obrigatória na escolha e ausente na recusa |
 
 TaskRecord e PendingContinuation são objetos internos do agente. A API retorna
 apenas public_task, nunca o registro completo. PendingContinuation não é incorporada
@@ -25,8 +25,8 @@ Um id observado para diagnóstico não pode virar dependência de atributo priva
 | INPUT_REQUIRED | GetTask | INPUT_REQUIRED | preservar |
 | INPUT_REQUIRED | escolha fora das opções | INPUT_REQUIRED | preservar sem alteração |
 | INPUT_REQUIRED | escolha válida ou recusa | WORKING | manter até resultado |
-| WORKING após accept | MCP complete/reservado true | COMPLETED | limpar |
-| WORKING após decline | MCP complete/reservado false | CANCELED | limpar |
+| WORKING após accept | MCP complete, isError ausente ou false, reservado true | COMPLETED | limpar |
+| WORKING após decline | MCP complete, isError ausente ou false, reservado false e motivo presente | CANCELED | limpar |
 | WORKING | isError da tool | FAILED | limpar |
 | WORKING após retry | erro de protocolo/rede/estado expirado | FAILED | limpar |
 | COMPLETED/CANCELED/FAILED | SendMessage | rejeição, estado mantido | não recriar |
@@ -35,11 +35,15 @@ GetTask não modifica o registro. Registrar a decisão do cliente e o resultado 
 histórico público sem copiar estruturas MCP com token. Estados intermediários
 ficam disponíveis ao GetTask enquanto o agente aguarda HTTP.
 
+Verificar isError antes dos campos de sucesso/cancelamento: isError true sempre
+segue a transição FAILED. Isso impede que um erro com reservado false seja
+interpretado como recusa concluída.
+
 ## Regras de isolamento e apresentação
 
 - A chave única de busca do registro é taskId; contextId não substitui a identidade.
 - ordered_alternatives vem de enum ou de uma opção const, sem reordenação.
-- pause_text = prefixo literal alternativas: seguido de ids unidos por vírgula e espaço.
+- pause_text = `"alternativas: " + ", ".join(ordered_alternatives)`; o prefixo tem exatamente um espaço após os dois-pontos, sem quebra de linha ou texto adicional.
 - Escolha inválida usa o mesmo pause_text e não chama MCP.
 - request_state é devolvido literalmente; a criptografia não é conhecida pelo agente.
 - traceparent_original pertence à Task e é passado explicitamente ao host em cada chamada.

@@ -23,8 +23,16 @@ ponte_task_id="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); pri
 ```
 
 Esperado: INPUT_REQUIRED e linha exata alternativas: sala-fusca, sala-mirante.
-Use ponte_task_id em GetTask; o estado deve continuar pausado. Não use o id
-ilustrativo dos exemplos 09/10.
+Não use o id ilustrativo dos exemplos 09/10. Consulte a identidade capturada:
+
+```bash
+python -c 'import json,sys; print(json.dumps({"jsonrpc":"2.0","id":"consultar-pausa-1","method":"GetTask","params":{"id":sys.argv[1]}}))' "$ponte_task_id" |
+curl -sS http://127.0.0.1:7300/a2a -H 'Content-Type: application/json' --data-binary @-
+```
+
+Esperado: mesmos id/contextId, estado INPUT_REQUIRED e pergunta original.
+O SDK pode devolver a Task diretamente em `result`; o wrapper `result.task` do
+exemplo também é aceito pelo validador. Não alterar a serialização do SDK.
 
 ## Continuar sem reenviar traceparent
 
@@ -36,6 +44,17 @@ curl -sS http://127.0.0.1:7300/a2a   -H 'Content-Type: application/json' --data-
 Esperado: mesma Task COMPLETED e artifact de sala-fusca, horário/responsável originais.
 No stderr MCP, conferir novo id JSON-RPC e o trace-id do pedido inicial.
 Nenhuma resposta pode conter token privado.
+
+Consultar novamente a mesma Task:
+
+```bash
+python -c 'import json,sys; print(json.dumps({"jsonrpc":"2.0","id":"consultar-conclusao-1","method":"GetTask","params":{"id":sys.argv[1]}}))' "$ponte_task_id" |
+curl -sS http://127.0.0.1:7300/a2a -H 'Content-Type: application/json' --data-binary @-
+rm "$ponte_pause_file"
+```
+
+Esperado: mesma identidade, COMPLETED e artifact `reserva` com sala-fusca,
+horário/responsável originais e versão da política lida do resource.
 
 ## Testes da ponte
 

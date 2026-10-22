@@ -14,15 +14,23 @@ Abrange FR-001 a FR-014 da spec 005 e a rastreabilidade dos 37 critérios no ín
 
 Dependências: 001, 002, 003 e 004 implementadas e verificadas.
 
+**Gate herdado pendente**: a 003 registra FR-008 reprovado enquanto o pin MCP
+anunciar form+url em vez de `{"elicitation": {"form": {}}}`. A 005 não pode iniciar
+sua aceitação ou declarar entrega concluída apenas documentando essa divergência.
+A solução deve ocorrer na 003 por API pública compatível e teste de wire; os pins
+exatos aprovados nessa correção devem ser refletidos nos dois manifests e nas
+constraints da entrega, sem inventar uma versão substituta neste planejamento.
+
 Phase 0 consolidada em [research.md](research.md); Phase 1 detalhada em
 [data-model.md](data-model.md), [contrato](contracts/entrega.md) e
-[quickstart.md](quickstart.md). Este plano encerra o design; não cria código nem tasks.md.
+[quickstart.md](quickstart.md). A execução está decomposta em [tasks.md](tasks.md),
+gerado depois do design; nenhum desses artefatos declara código ou testes executados.
 
 ## Technical Context
 
 **Language/Version**: Python 3.12+ como baseline do projeto; o requisito mínimo externo é Python 3.10+.
 
-**Primary Dependencies**: Mesmos pins comuns: mcp==2.3.0, a2a-sdk[http-server]==1.2.3, starlette==0.48.0, uvicorn==0.31.1, sse-starlette==3.0.3, pydantic==2.12.0. Ferramentas de evidência usam biblioteca padrão.
+**Primary Dependencies**: Pins de base: mcp==2.3.0, a2a-sdk[http-server]==1.2.3, starlette==0.48.0, uvicorn==0.31.1, sse-starlette==3.0.3, pydantic==2.12.0. A aprovação funcional depende da resolução de 003/FR-008; qualquer revisão necessária deve ser exata, validada na capacidade de origem e consolidada nos dois manifests antes das constraints. Ferramentas de evidência usam biblioteca padrão.
 
 **Storage**: Somente evidências de execução e arquivo de constraints versionado, sem banco. Estado temporário de um teste MRTR fica fora do repositório; segredo não é artefato de entrega.
 
@@ -51,10 +59,10 @@ A aprovação abaixo é de design; não declara que testes da aplicação passar
 | Princípio | Antes de Phase 0 | Após Phase 1 / evidência de design |
 | --- | --- | --- |
 | I. Fronteiras e responsabilidade | PASS — requisito preservado | PASS — Comandos sobem dois processos independentes; scripts de apoio não fundem os serviços. |
-| II. Estado explícito | PASS — requisito preservado | PASS — Evidências incluem pausa/retry e restart, sem pressupor sessão ou persistência de reservas. |
+| II. Estado explícito | PASS — requisito preservado | BLOQUEADO na dependência 003/FR-008 — Exigir capabilities exatas e testes de wire aprovados antes da aceitação; pausa/retry/restart previstos sem sessão. |
 | III. Integridade/opacidade | PASS — requisito preservado | PASS — Chave gerada localmente, TTL 600 e AEAD documentados; tokens temporários excluídos das evidências públicas. |
 | IV. Contratos/determinismo | PASS — requisito preservado | PASS — Validador original e arquivos protegidos comparados com baseline; nenhuma saída fabricada. |
-| V. Conformidade/rastreio | PASS — requisito preservado | PASS — 36 PASS reais, logs e testes manuais com revisão/ambiente identificáveis. |
+| V. Conformidade/rastreio | PASS — requisito preservado | CONDICIONAL — 36 PASS reais, logs e testes manuais são gates futuros e não dispensam resolver 003/FR-008. |
 
 A aprovação de design não substitui a execução futura. README e evidências só podem afirmar 36 PASS depois da execução com os processos recém-iniciados. Limitações comprovadas do SDK e o perfil de versão A2A serão documentados explicitamente; nenhum critério ausente será marcado como atendido por uma ressalva.
 
@@ -70,6 +78,7 @@ specs/005-conformidade-entrega/
 ├── research.md
 ├── data-model.md
 ├── quickstart.md
+├── tasks.md
 ├── contracts/entrega.md
 └── checklists/requirements.md
 ```
@@ -112,6 +121,26 @@ dados/, exemplos/, validador/       # protegidos, sem alterações
 
 FR-001/002/003: clone limpo, pins, comandos e segredo; FR-004: 36 verificações e saída; FR-005/006/007: evidências manuais; FR-008/009/010: README e resultados fiéis; FR-011/012: integridade da árvore/fork/main/ausência LLM; FR-013/014: limitações documentadas e escopo. O índice specs/README.md mantém o mapa de todos os critérios e aponta a feature funcional responsável.
 
+As provas adicionais têm responsabilidades distintas: o script cobre restart manual,
+rastreamento e fluxos públicos/privacidade. A suíte `servidor-mcp/tests/test_mrtr.py`
+da 002 comprova integridade, expiração, argumentos e capability com HTTP real;
+o relógio controlado fica no servidor isolado do teste, mantendo TTL 600 de produção.
+Argumentos adulterados podem ser rejeitados ou substituídos pelos valores selados,
+conforme a constituição; nenhuma reserva pode usar valores adulterados. Testes de
+serialização da 004 complementam a inspeção HTTP com tokens sentinela conhecidos.
+Mocks do suporte não são evidência de execução dos protocolos.
+
+Cada cenário mutante do script começa com os dois processos reiniciados e log
+externo próprio. A exceção é a transição emitir → retomar do cenário de restart:
+somente o MCP reinicia, preservando chave e audience. O caso rastreamento inicia
+seu próprio fluxo A2A em agente limpo e usa trace-id exclusivo; a evidência da suíte
+oficial preserva separadamente o trace-id impresso pelo validador e a descoberta
+do agente, sem atribuir a ele requests do cliente direto do validador.
+
+A última reprodução em clone limpo fornece a saída final a transcrever no README.
+Todos os arquivos de evidência são concluídos antes do push; a conferência pública
+posterior apenas verifica a main e informa seu hash/link, sem edição local pendente.
+
 ### Cobertura por requisito
 
 Os casos abaixo são validações planejadas, não resultados de testes já executados.
@@ -139,7 +168,9 @@ O validador muda reservas: toda nova rodada começa com ambos os processos reini
 
 ## Complexity Tracking
 
-Sem violações constitucionais ou exceções de complexidade. As adaptações de perfil
-necessárias ao wire do starter estão documentadas em research.md e no contrato;
-não alteram SDKs, arquivos protegidos ou as regras do desafio. Não há camada de
+Sem exceções de complexidade propostas. Há uma pendência funcional herdada de
+003/FR-008; registrar form+url não constitui exceção constitucional ou aprovação
+da entrega. A execução da 005 exige esse gate resolvido por API pública e teste
+de wire aprovado. O perfil A2A está documentado em research.md e no contrato;
+não alterar SDKs, arquivos protegidos ou regras do desafio. Não há camada de
 serviços, repositório abstrato, banco, autenticação ou instrumentação adicional.

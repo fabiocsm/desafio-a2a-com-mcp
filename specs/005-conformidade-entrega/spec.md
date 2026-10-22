@@ -38,9 +38,9 @@ Como avaliador, quero localizar a passagem de estado entre os serviços e compro
 
 **Acceptance Scenarios**:
 
-1. **Given** um pedido A2A com o trace-id informado na validação, **When** o avaliador examina o stderr do MCP, **Then** localiza tools/list antes do primeiro tools/call, o mesmo trace-id e ids distintos na chamada inicial e no retry
+1. **Given** um pedido A2A com o trace-id informado na validação, **When** o avaliador examina o stderr do MCP, **Then** localiza tools/list do agente antes do primeiro tools/call do agente, o mesmo trace-id e ids distintos na chamada inicial e no retry, sem confundir a descoberta do cliente direto do validador com a do agente
 2. **Given** um estado válido capturado diretamente do MCP, **When** o avaliador reinicia somente o servidor com a mesma chave e envia o retry antes da expiração, **Then** a reserva conclui sem recuperar estado em memória do servidor
-3. **Given** estados adulterados/expirados, argumentos adulterados e capability ausente em cenários separados, **When** o avaliador repete os pedidos previstos, **Then** encontra as rejeições exigidas e nenhuma reserva com dados adulterados
+3. **Given** estados adulterados/expirados, argumentos adulterados e capability form ausente em cenários separados, **When** o avaliador repete os pedidos previstos, **Then** estados adulterados/expirados recebem -32602, conflito que exige elicitation sem form recebe -32021 com HTTP 400 e requiredCapabilities, e argumentos divergentes são rejeitados ou substituídos pelos valores selados, sem reserva com dados adulterados; ambas as estratégias de proteção dos argumentos são aceitas
 4. **Given** uma pausa A2A, uma escolha inválida, uma recusa e duas Tasks simultaneamente pausadas, **When** o avaliador segue cada cenário, **Then** observa a lista exata, os estados esperados e a separação das reservas, sem exposição de requestState
 
 ---
@@ -86,7 +86,7 @@ Como responsável pela entrega, quero publicar evidências e instruções fiéis
 - **FR-011**: `dados/`, `validador/` e `exemplos/` DEVEM permanecer inalterados e em suas posições. A estrutura com servidor-mcp/ e agente/ DEVE ser preservada e ambos DEVEM continuar processos separados por HTTP.
 - **FR-012**: A solução DEVE ser entregue por link de um único repositório público no GitHub, fork do starter, com toda a entrega na main, sem LLM, segredo hardcoded ou dependência de SDK de provedor de LLM.
 - **FR-013**: Limitações reais do SDK DEVEM ser documentadas com trecho de evidência e impacto, sem reescrita de protocolo ou declaração de conformidade de requisito ausente.
-- **FR-014**: A entrega NÃO DEVE introduzir autenticação, streaming, interface gráfica, containers, compose, deploy, gateway, banco de dados, persistência em disco das reservas ou spans/atributos OpenTelemetry, conforme todas as exclusões da constituição.
+- **FR-014**: A entrega NÃO DEVE introduzir autenticação, streaming A2A ou SSE de produto, interface gráfica, containers, compose, deploy, gateway, banco de dados, persistência em disco das reservas ou spans/atributos OpenTelemetry, conforme todas as exclusões da constituição. O transporte MCP Streamable HTTP permanece obrigatório; a mera presença de dependências transitivas não habilita recursos excluídos.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -108,6 +108,7 @@ Como responsável pela entrega, quero publicar evidências e instruções fiéis
 ## Assumptions
 
 - Depende das capacidades implementadas em [001](../001-servidor-mcp-salas/spec.md), [002](../002-reserva-mrtr-segura/spec.md), [003](../003-agente-a2a-reservas/spec.md) e [004](../004-ponte-a2a-mrtr/spec.md).
+- A pendência de capabilities exatas em 003/FR-008 deve estar resolvida com teste de wire aprovado antes da aceitação da 005; documentar anúncio adicional form+url não satisfaz esse requisito nem autoriza declarar a entrega concluída.
 - Todos os cinco princípios constitucionais se aplicam; esta feature encerra a demonstração de conformidade e não concentra correções funcionais sem rastreabilidade às specs de origem.
 - Esta etapa gera somente requisitos de entrega; a execução real e a substituição do README ocorrerão durante a implementação desta feature.
 - A validação original e seus dados são a referência externa; os resultados não serão simulados para preencher documentação.

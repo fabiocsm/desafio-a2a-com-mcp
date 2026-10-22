@@ -39,6 +39,9 @@ Sala inexistente, janela e duração continuam sendo avaliadas exclusivamente pe
 SUBMITTED → WORKING → COMPLETED ou FAILED no caminho desta feature.
 004 acrescentará WORKING → INPUT_REQUIRED e retomadas.
 Task terminal não retorna a WORKING; GetTask não muda o estado.
+Falha técnica/protocolo após criar Task também encerra em FAILED, com mensagem
+`Falha ao executar pedido no servidor MCP`, sem artifact e sem exceção/corpo MCP bruto. O retorno
+input_required é uma variante própria para integração 004, não uma falha técnica.
 
 Registrar a Task antes de aguardar o HTTP MCP; o await permite GetTask observar
 o estado corrente. Não é necessário worker de background ou fila externa.

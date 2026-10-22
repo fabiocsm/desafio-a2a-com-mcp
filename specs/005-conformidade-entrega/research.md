@@ -24,7 +24,7 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 ## R03 — Evidência adicional
 
-**Decision**: Usar testes HTTP/subprocesso das features e script de apoio para restart manual, trace-id/ids, expiração e privacidade completa. Registrar resultados sem valores secretos/token.
+**Decision**: Usar o script para restart manual, trace-id/ids e fluxos públicos/privacidade; usar a suíte HTTP/subprocesso da feature 002 para integridade, expiração com relógio controlado no servidor isolado, argumentos e capability, mantendo TTL 600 de produção. Complementar a varredura HTTP com os testes de serialização e tokens sentinela da 004. Registrar resultados sem valores secretos/token e identificar o método de cada prova, sem apresentar mocks do suporte como execução dos protocolos.
 
 **Rationale**: O README do validador explicita que logs e restart não são demonstrados pela suíte. Há ainda limites na verificação de vazamento que justificam teste complementar.
 
@@ -32,9 +32,9 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 ## R04 — Documentação de diferenças dos SDKs
 
-**Decision**: Documentar AEAD oficial, raw MCP, anúncio form+url, perfil A2A sem header e GetTask como Task direta no SDK. Citar a fonte e o efeito observável de cada diferença.
+**Decision**: Documentar AEAD oficial, raw MCP, perfil A2A sem header e GetTask como Task direta no SDK, citando fonte e efeito observável. Registrar o anúncio form+url como pendência de conformidade de 003/FR-008, não como variação aceita; manter a aceitação da 005 bloqueada até solução por API pública compatível e teste do wire exato aprovado. Se a correção exigir mudança de pin, consolidar somente versões exatas efetivamente validadas nas duas aplicações e nas constraints.
 
-**Rationale**: O enunciado aceita variações de SDK especificadas e exige evidência de limitações reais, sem reescrever protocolo. O objetivo é compatibilidade com o desafio sem prometer conformidade de negociação além do perfil adotado.
+**Rationale**: O enunciado aceita apenas as variações explicitadas, como GetTask direto, e exige evidência de limitações reais sem reescrever protocolo. Essa documentação não dispensa capabilities exatas nem permite aprovar um requisito ausente. O perfil A2A também deve ser descrito sem prometer negociação normativa irrestrita.
 
 **Alternatives considered**: Esconder adaptação, imitar snapshots de outra stack ou modificar SDK/validador tornaria a entrega difícil de avaliar.
 
@@ -57,7 +57,8 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 ## Resultado da pesquisa
 
-Decisões de design resolvidas, sem esclarecimentos bloqueantes. Os pins foram
+Design de entrega decomposto, com dependência de conformidade ainda pendente em
+003/FR-008 e sem solicitação de dispensa ao usuário. Os pins de base foram
 verificados em metadados publicados; a combinação MCP/A2A/Starlette/Uvicorn/SSE/Pydantic teve
 resolução pip dry-run bem-sucedida direcionada a Python 3.12, sem instalação no
 projeto. Isso demonstra resolução de dependências, não execução da aplicação nem
