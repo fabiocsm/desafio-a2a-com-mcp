@@ -1,6 +1,17 @@
 .env
+.env*
 .venv/
+venv/
 __pycache__/
+*.pyc
+*.egg-info/
 node_modules/
 dist/
+build/
 *.log
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/

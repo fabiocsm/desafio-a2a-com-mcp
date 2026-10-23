@@ -1,8 +1,18 @@
 # Quickstart: Ponte A2A–MRTR com pausa e retomada por Task
 
-Guia de validação **para depois da implementação**. Os módulos, testes e scripts
-citados são entregáveis planejados; não foram criados ou executados por $speckit-plan.
-Execute comandos a partir da raiz do repositório, salvo indicação contrária.
+Guia de validação da ponte. Execute comandos a partir da raiz do repositório,
+salvo indicação contrária. A feature 005 consolida o README, o clone limpo e a
+entrega do fork; esses gates não são declarados cumpridos aqui.
+
+## Gate da base (T001)
+
+Antes da ponte, a base 001–003 já respondia. Conferência nesta etapa, com os
+pacotes editáveis do `.venv` e sem alterar `dados/`, `validador/` ou `exemplos/`:
+
+- `python -m unittest discover -s servidor-mcp/tests -v` — 45 testes, OK.
+- `python -m unittest discover -s agente/tests -v`, ainda sem `test_ponte.py` — 22 testes, OK.
+- Descoberta, `politica://uso`, reserva livre, MRTR manual e callback defensivo
+  já existiam em `ponte_mcp` e `ponte_agente`. Nenhuma pendência bloqueou o avanço.
 
 ## Preparação
 
@@ -70,3 +80,144 @@ Não ampliar o teste para disputa simultânea de escrita no mesmo milissegundo.
 
 Após esta etapa, a solução funcional está apta à execução oficial integral;
 a feature 005 organiza a reprodução e as evidências finais.
+
+## Onde a pausa e o retry acontecem
+
+A Task pública e a continuação privada ficam separadas em `agente/src/ponte_agente/tasks.py`.
+`pause_for_input` (por volta da linha 380) grava `PendingContinuation` e só então
+publica `TASK_STATE_INPUT_REQUIRED`. `repeat_pause` (linha 405) devolve o mesmo
+`pause_text` sem chamar o MCP. `begin_resume` (linha 429) volta a `WORKING` e
+mantém o token. `_clear_private_continuation` (linha 363) zera `pending` em
+`COMPLETED`, `CANCELED` e `FAILED`. `GetTask` continua devolvendo só a cópia da Task.
+
+A tradução do formulário está em `continuation_from_input_required`
+(`agente/src/ponte_agente/ponte.py`, linha 47): uma elicitation `form`, ordem de
+`enum` ou `const` único, chave recebida e `requestState` literal.
+
+O handler pausa em `_pause_from_input_required` (`handler.py`, linha 218) e
+retoma em `_resume_task` (linha 244). O retry chama `call_tool_raw` (linha 263)
+com os argumentos originais, a chave original, o token ecoado e o trace da Task.
+Escolha inválida ou Task terminal retornam antes dessa chamada. O id JSON-RPC
+novo é o da sessão do SDK, em `mcp_host.py` `call_tool_raw` (linha 300); o agente
+não reenvia o envelope anterior. Se a conexão HTTP cair, o host reabre o cliente
+uma vez e repete a mesma chamada. Erro JSON-RPC, inclusive estado expirado, não
+é repetido nem renovado.
+
+## Evidências desta etapa
+
+Execução real, processos HTTP recém-iniciados, sem publicar segredo nem token:
+
+```bash
+python -m unittest discover -s agente/tests -v
+```
+
+38 testes, OK. Inclui os casos diretos de 003 e `agente/tests/test_ponte.py`.
+`dados/` permaneceu byte a byte igual ao início da suíte.
+
+Casos com os dois processos reais: pausa de sala-garagem 14:00–15:00, GetTask,
+`escolha=sala-fusca`, artifact `reserva` com política `2026-11-01` lida do
+resource; escolha `sala-aquario` repetindo a mesma linha e só então a escolha
+válida; `escolha=recusar` com `action: decline` e salas alternativas ainda
+livres; Tasks `COMPLETED`, `CANCELED` e `FAILED` recusando outra mensagem sem
+novo `tools/call`; conflito sem alternativa com a mensagem exata; duas Tasks
+retomadas em ordem inversa com traces distintos; dois pedidos iguais com a
+mesma pausa; Task sem `traceparent` que não herda o trace da outra; restart só
+do MCP, com a mesma chave, e retomada da Task que continuou no agente.
+
+Casos controlados, sem o domínio real: enum fora de ordem alfabética, `const`
+de uma sala, chave variável, token sentinela, `isError` com `reservado: false`
+virando `FAILED`, erro `-32602` e falha de conexão. Nesses, o texto público não
+contém o sentinela.
+
+O teste HTTP de pausa observou, no proxy, `tools/list` antes do primeiro
+`tools/call`, argumentos originais no retry, `content.sala` só na resposta
+`accept`, cabeçalhos `MCP-Protocol-Version`, `Mcp-Method` e `Mcp-Name`,
+capability `elicitation.form` e ids JSON-RPC diferentes entre a chamada inicial
+e o retry. O stderr do MCP registrou método, id e o trace-id da Task.
+
+### Validador oficial
+
+Processos novos em `127.0.0.1:7301` (`/mcp`) e `127.0.0.1:7300` (`/a2a`),
+`REQUEST_STATE_SECRET` só no ambiente do MCP. Saída de
+`python3 validador/validar.py --agente http://127.0.0.1:7300 --mcp http://127.0.0.1:7301`:
+
+```text
+trace-id desta execucao: 2d624cadbf032f3f98dda00c3eb25195
+procure esse valor no stderr do servidor MCP para conferir a propagacao do traceparent.
+
+PASS 01 tools/list traz as tres tools
+PASS 02 toda tool tem inputSchema de objeto
+PASS 03 listar_salas devolve structuredContent e o mesmo JSON em texto
+PASS 04 _meta sem protocolVersion devolve -32602 e HTTP 400
+PASS 05 _meta sem clientCapabilities devolve -32602 e HTTP 400
+PASS 06 tool inexistente e recusada, por -32602 ou por isError
+PASS 07 resources/read de politica://uso devolve a politica
+PASS 08 resources/read de URI inexistente devolve -32602
+PASS 09 sala inexistente devolve isError com a mensagem exata
+PASS 10 fora da janela devolve isError com a mensagem exata
+PASS 11 duracao acima de 2h devolve isError com a mensagem exata
+PASS 12 intervalo invertido devolve isError com a mensagem exata
+PASS 13 conflito devolve input_required com inputRequests e requestState
+PASS 14 a elicitation e form mode e oferece as alternativas na ordem certa
+PASS 15 conflito sem a capability elicitation devolve -32021 e HTTP 400
+PASS 16 retry com inputResponses e requestState conclui a reserva
+PASS 17 requestState adulterado e rejeitado com -32602
+PASS 18 argumentos adulterados no retry nao tomam efeito
+PASS 19 recusa conclui sem reservar e sem isError
+PASS 20 conflito sem alternativa possivel devolve isError com a mensagem exata
+
+PASS 21 agent card responde 200 no well-known com JSON
+PASS 22 o card declara a interface JSON-RPC com url e versao 1.0
+PASS 23 o card declara a skill reservar-sala
+PASS 24 SendMessage com sala livre conclui a Task
+PASS 25 o artifact chama reserva e traz a versao da politica
+PASS 26 GetTask devolve id, contextId e estado corrente
+PASS 27 SendMessage com sala ocupada pausa a Task
+PASS 28 a Task pausada lista as alternativas na ordem certa
+PASS 29 escolha fora do enum mantem a Task pausada
+PASS 30 a continuacao conclui a Task na sala escolhida
+PASS 31 SendMessage em Task terminal e recusado
+PASS 32 a recusa termina a Task em CANCELED
+PASS 33 duas Tasks pausadas ao mesmo tempo concluem cada uma com a sua reserva
+PASS 34 nenhuma resposta A2A carrega o requestState
+PASS 35 sala inexistente termina a Task em FAILED com a mensagem da tool
+PASS 36 o agente e deterministico: o mesmo pedido produz a mesma pausa
+
+resumo: 36 passaram, 0 falharam, de 36 verificacoes
+```
+
+No stderr do MCP, o trace-id `2d624cadbf032f3f98dda00c3eb25195` apareceu na
+descoberta e nas chamadas do agente, com span-id diferente a cada request:
+
+```text
+[mcp] method=tools/list id=1 traceparent=00-2d624cadbf032f3f98dda00c3eb25195-b4c84be4085f2e8f-01
+[mcp] method=resources/read id=2 traceparent=00-2d624cadbf032f3f98dda00c3eb25195-f478f6534f7571a0-01
+[mcp] method=tools/call id=3 traceparent=00-2d624cadbf032f3f98dda00c3eb25195-62795e07ac7e3f96-01
+[mcp] method=tools/call id=4 traceparent=00-2d624cadbf032f3f98dda00c3eb25195-bb705150208954db-01
+[mcp] method=tools/call id=5 traceparent=00-2d624cadbf032f3f98dda00c3eb25195-84a6bd59cd40c1cb-01
+```
+
+Os ids 3, 4 e 5 são chamadas distintas. As verificações 15, 17 e 18 cobrem, no
+MCP real, capability ausente, estado adulterado e argumentos adulterados. A
+expiração com relógio controlado permanece na suíte de 002
+(`servidor-mcp/tests/test_mrtr.py`), que passou junto com os outros 44 testes
+desse processo. O agente não abre o token para tratar `-32602`: a Task vai a
+`FAILED` com `Falha ao executar pedido no servidor MCP`.
+
+### Limitação observada do SDK
+
+O servidor registra falha de tool com prefixo do SDK. No mesmo stderr:
+
+```text
+Tool 'reservar_sala' failed: 'Error executing tool reservar_sala: Sem alternativas disponiveis no intervalo'
+Tool 'reservar_sala' failed: 'Error executing tool reservar_sala: Sala inexistente: sala-delorean'
+```
+
+A Task `FAILED` preserva a mensagem de domínio no fim do texto. O enunciado
+aceita esse prefixo. Não houve contorno de protocolo.
+
+O id JSON-RPC é atribuído pela sessão. A prova de id novo é o log e o corpo
+capturado no proxy de teste, sem ler contador interno do SDK. O callback de
+elicitation existe para anunciar `form`; com `allow_input_required=True` o SDK
+devolve `InputRequiredResult` e o callback não roda. Reiniciar o agente perde
+as Tasks em memória; o restart exigido é o do MCP, com a Task ainda no agente.

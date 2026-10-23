@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from mcp import Client
 from mcp.client.session import ClientRequestContext, ClientSession, ElicitationFnT
+from mcp.shared.exceptions import MCPError
 import mcp_types as types
 
 from ponte_agente.tasks import RequestTrace
@@ -48,6 +49,43 @@ async def defensive_elicitation_callback(
         "Callback de elicitation não deve ser executado automaticamente; "
         "o agente deve receber InputRequiredResult cru via session.call_tool(..., allow_input_required=True)."
     )
+
+
+def _is_transport_failure(exc: BaseException) -> bool:
+    """Distingue queda de conexão de erro JSON-RPC, para um único restabelecimento."""
+    if isinstance(exc, MCPError):
+        return False
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    transport_names = {
+        "TransportError",
+        "TimeoutException",
+        "ConnectError",
+        "ReadError",
+        "WriteError",
+        "RemoteProtocolError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "PoolTimeout",
+        "NetworkError",
+        "HTTPStatusError",
+    }
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, MCPError):
+            return False
+        module_name = type(current).__module__
+        if type(current).__name__ in transport_names and (
+            module_name.startswith("httpx") or module_name.startswith("httpcore")
+        ):
+            status_code = getattr(getattr(current, "response", None), "status_code", None)
+            if type(current).__name__ == "HTTPStatusError":
+                return isinstance(status_code, int) and status_code >= 500
+            return True
+        if isinstance(current, (ConnectionError, TimeoutError)):
+            return True
+        current = current.__cause__
+    return False
 
 
 def build_trace_meta(trace: RequestTrace | str | None = None) -> types.RequestParamsMeta | None:
@@ -234,6 +272,31 @@ class MCPHost:
         self._snapshot = snapshot
         return snapshot
 
+    async def reopen(self) -> None:
+        """Fecha e abre de novo o cliente HTTP depois de o processo MCP ter sido reiniciado."""
+        await self.close()
+        await self.open()
+
+    async def _call_tool_once(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        *,
+        trace: RequestTrace | str | None,
+        input_responses: types.InputResponses | None,
+        request_state: str | None,
+    ) -> types.CallToolResult | types.InputRequiredResult:
+        """Uma chamada tools/call. O SDK atribui o id JSON-RPC; os argumentos não são alterados."""
+        meta = build_trace_meta(trace)
+        return await self.session.call_tool(
+            name,
+            arguments,
+            input_responses=input_responses,
+            request_state=request_state,
+            meta=meta,
+            allow_input_required=True,
+        )
+
     async def call_tool_raw(
         self,
         name: str,
@@ -243,17 +306,31 @@ class MCPHost:
         input_responses: types.InputResponses | None = None,
         request_state: str | None = None,
     ) -> types.CallToolResult | types.InputRequiredResult:
-        """Executa tools/call via session.call_tool(..., allow_input_required=True)."""
-        meta = build_trace_meta(trace)
-        result = await self.session.call_tool(
+        """Executa tools/call via session.call_tool(..., allow_input_required=True).
+
+        Se a conexão cair, reabre o cliente uma vez e repete a mesma chamada, com os
+        mesmos argumentos, input_responses e request_state. Erro JSON-RPC não é repetido.
+        """
+        try:
+            return await self._call_tool_once(
+                name,
+                arguments,
+                trace=trace,
+                input_responses=input_responses,
+                request_state=request_state,
+            )
+        except Exception as exc:
+            if not _is_transport_failure(exc):
+                raise
+        await self.reopen()
+        await self.ensure_discovered(trace=trace)
+        return await self._call_tool_once(
             name,
             arguments,
+            trace=trace,
             input_responses=input_responses,
             request_state=request_state,
-            meta=meta,
-            allow_input_required=True,
         )
-        return result
 
     async def call_discovered_reservation_tool(
         self,

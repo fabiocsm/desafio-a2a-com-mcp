@@ -166,12 +166,44 @@ class RequestTrace:
         return {"traceparent": tp}
 
 
+@dataclass(frozen=True, slots=True)
+class OriginalArguments:
+    """Argumentos MCP originais, copiados exatamente como foram enviados na primeira chamada."""
+
+    sala: str
+    inicio: str
+    fim: str
+    responsavel: str
+
+    def as_mcp_dict(self) -> dict[str, str]:
+        """Devolve os quatro argumentos originais, sem substituir a sala pela alternativa."""
+        return {
+            "sala": self.sala,
+            "inicio": self.inicio,
+            "fim": self.fim,
+            "responsavel": self.responsavel,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PendingContinuation:
+    """Continuação privada da Task. Nunca entra na Task pública nem em metadata A2A."""
+
+    tool_name: str
+    original_arguments: OriginalArguments
+    elicitation_key: str
+    ordered_alternatives: tuple[str, ...]
+    pause_text: str
+    request_state: str
+
+
 @dataclass(slots=True)
 class TaskRecord:
-    """Registro interno por Task: Task pública e traceparent original opcional; sem regras de sala."""
+    """Registro interno por Task: Task pública, trace original e continuação privada opcional."""
 
     public_task: a2a_pb2.Task
     traceparent_original: str | None = None
+    pending: PendingContinuation | None = None
     trace: RequestTrace = field(init=False)
     state_transitions: list[int] = field(default_factory=list)
     raw_input_required: Any = None
@@ -278,7 +310,7 @@ class TaskStore:
         task.status.CopyFrom(
             build_task_status(a2a_pb2.TASK_STATE_COMPLETED, message=agent_msg)
         )
-        record.raw_input_required = None
+        self._clear_private_continuation(record)
         record.state_transitions.append(a2a_pb2.TASK_STATE_COMPLETED)
         return clone_public_task(task)
 
@@ -301,7 +333,7 @@ class TaskStore:
         task.status.CopyFrom(
             build_task_status(a2a_pb2.TASK_STATE_FAILED, message=agent_msg)
         )
-        record.raw_input_required = None
+        self._clear_private_continuation(record)
         record.state_transitions.append(a2a_pb2.TASK_STATE_FAILED)
         return clone_public_task(task)
 
@@ -324,6 +356,85 @@ class TaskStore:
         task.status.CopyFrom(
             build_task_status(a2a_pb2.TASK_STATE_CANCELED, message=agent_msg)
         )
-        record.raw_input_required = None
+        self._clear_private_continuation(record)
         record.state_transitions.append(a2a_pb2.TASK_STATE_CANCELED)
         return clone_public_task(task)
+
+    def _clear_private_continuation(self, record: TaskRecord) -> None:
+        """Remove a continuação privada ao entrar em estado terminal. GetTask segue só com a Task pública."""
+        record.pending = None
+        record.raw_input_required = None
+
+    def _append_user_message(
+        self,
+        record: TaskRecord,
+        user_message: a2a_pb2.Message,
+        text: str,
+    ) -> None:
+        """Anexa a mensagem do cliente à Task existente, preservando taskId e contextId."""
+        message = normalize_user_message(user_message, text)
+        message.task_id = record.public_task.id
+        message.context_id = record.public_task.context_id
+        record.public_task.history.append(message)
+
+    def pause_for_input(
+        self,
+        task_id: str,
+        pending: PendingContinuation,
+        *,
+        raw_input_required: Any = None,
+    ) -> a2a_pb2.Task:
+        """Guarda a continuação e só então publica TASK_STATE_INPUT_REQUIRED."""
+        record = self.ensure_not_terminal(task_id)
+        record.pending = pending
+        record.raw_input_required = raw_input_required
+        task = record.public_task
+        agent_message = build_message(
+            role=a2a_pb2.ROLE_AGENT,
+            text=pending.pause_text,
+            task_id=task.id,
+            context_id=task.context_id,
+        )
+        task.history.append(agent_message)
+        task.status.CopyFrom(
+            build_task_status(a2a_pb2.TASK_STATE_INPUT_REQUIRED, message=agent_message)
+        )
+        record.state_transitions.append(a2a_pb2.TASK_STATE_INPUT_REQUIRED)
+        return clone_public_task(task)
+
+    def repeat_pause(
+        self,
+        task_id: str,
+        user_message: a2a_pb2.Message,
+        text: str,
+    ) -> a2a_pb2.Task:
+        """Repete o mesmo texto de pausa sem alterar a continuação privada nem chamar o MCP."""
+        record = self.ensure_not_terminal(task_id)
+        if record.pending is None:
+            raise TerminalTaskStateError(f"Task {task_id} nao possui continuacao pendente")
+        self._append_user_message(record, user_message, text)
+        task = record.public_task
+        agent_message = build_message(
+            role=a2a_pb2.ROLE_AGENT,
+            text=record.pending.pause_text,
+            task_id=task.id,
+            context_id=task.context_id,
+        )
+        task.history.append(agent_message)
+        task.status.CopyFrom(
+            build_task_status(a2a_pb2.TASK_STATE_INPUT_REQUIRED, message=agent_message)
+        )
+        return clone_public_task(task)
+
+    def begin_resume(
+        self,
+        task_id: str,
+        user_message: a2a_pb2.Message,
+        text: str,
+    ) -> TaskRecord:
+        """Registra a decisão e volta a WORKING antes do HTTP de retomada, mantendo a continuação."""
+        record = self.ensure_not_terminal(task_id)
+        if record.pending is None:
+            raise TerminalTaskStateError(f"Task {task_id} nao possui continuacao pendente")
+        self._append_user_message(record, user_message, text)
+        return self.transition_to_working(task_id)

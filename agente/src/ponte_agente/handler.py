@@ -20,7 +20,14 @@ from a2a.utils.errors import (
 import mcp_types as types
 
 from ponte_agente.mcp_host import DefensiveElicitationCalledError, MCPHost
-from ponte_agente.tasks import TaskStore
+from ponte_agente.ponte import (
+    PonteFormatoError,
+    build_retry_input_responses,
+    continuation_from_input_required,
+    decision_is_acceptable,
+    interpret_client_decision,
+)
+from ponte_agente.tasks import TaskRecord, TaskStore
 
 TECHNICAL_MCP_FAILURE_MESSAGE = "Falha ao executar pedido no servidor MCP"
 
@@ -157,7 +164,7 @@ class AgenteRequestHandler(RequestHandler):
         params: a2a_pb2.SendMessageRequest,
         context: ServerCallContext,
     ) -> a2a_pb2.Task | a2a_pb2.Message:
-        """Processa SendMessage: valida gramática, cria Task e delega reserva ao servidor MCP."""
+        """Processa SendMessage novo ou a continuação da mesma Task, sem abrir outra identidade."""
         user_msg, text = extract_message_text(params)
         referenced_task_id = user_msg.task_id.strip() if user_msg.task_id else ""
 
@@ -170,9 +177,7 @@ class AgenteRequestHandler(RequestHandler):
                 raise InvalidParamsError(
                     message=f"Task '{referenced_task_id}' encontra-se em estado terminal definitivo ({state_name})"
                 )
-            raise UnsupportedOperationError(
-                message="Retomada de Task em pausa pertence a integracao da ponte (spec 004)"
-            )
+            return await self._resume_task(record, user_msg, text)
 
         parsed = parse_reservation_command(text)
         traceparent = (
@@ -188,36 +193,111 @@ class AgenteRequestHandler(RequestHandler):
         )
         task_id = record.public_task.id
         self._task_store.transition_to_working(task_id)
+        arguments = dict(parsed.to_mcp_arguments())
 
         try:
             snapshot = await self._mcp_host.ensure_discovered(trace=record.trace)
             mcp_result = await self._mcp_host.call_tool_raw(
                 snapshot.reservation_tool.name,
-                parsed.to_mcp_arguments(),
+                arguments,
                 trace=record.trace,
             )
-
             if isinstance(mcp_result, types.InputRequiredResult):
-                # Fronteira 003/004: preserva retorno cru internamente sem auto-resposta nem falso terminal.
-                record.raw_input_required = mcp_result
-                current_task = self._task_store.get_public_task(task_id)
-                assert current_task is not None
-                return current_task
-
-            if mcp_result.is_error:
-                error_text = extract_tool_error_text(mcp_result)
-                return self._task_store.fail_task(task_id, error_text)
-
-            reservation_data = extract_reservation_payload(mcp_result)
-            return self._task_store.complete_task(
-                task_id,
-                reservation_data,
-                policy_version=snapshot.policy_version,
-            )
+                return self._pause_from_input_required(
+                    task_id,
+                    mcp_result,
+                    tool_name=snapshot.reservation_tool.name,
+                    arguments=arguments,
+                )
+            return self._apply_call_result(task_id, mcp_result, snapshot.policy_version)
         except DefensiveElicitationCalledError:
             raise
         except Exception:
             return self._task_store.fail_task(task_id, TECHNICAL_MCP_FAILURE_MESSAGE)
+
+    def _pause_from_input_required(
+        self,
+        task_id: str,
+        mcp_result: types.InputRequiredResult,
+        *,
+        tool_name: str,
+        arguments: Mapping[str, str],
+    ) -> a2a_pb2.Task:
+        """Converte o resultado cru em pausa pública. O token fica só na continuação privada."""
+        try:
+            pending = continuation_from_input_required(
+                mcp_result,
+                tool_name=tool_name,
+                original_arguments=arguments,
+            )
+        except PonteFormatoError:
+            record = self._task_store.get_record(task_id)
+            if record is not None:
+                record.raw_input_required = mcp_result
+            return self._task_store.fail_task(task_id, TECHNICAL_MCP_FAILURE_MESSAGE)
+        return self._task_store.pause_for_input(
+            task_id,
+            pending,
+            raw_input_required=mcp_result,
+        )
+
+    async def _resume_task(
+        self,
+        record: TaskRecord,
+        user_msg: a2a_pb2.Message,
+        text: str,
+    ) -> a2a_pb2.Task:
+        """Retoma a Task pelo taskId. O trace original não é substituído por header posterior."""
+        task_id = record.public_task.id
+        pending = record.pending
+        if pending is None or record.public_task.status.state != a2a_pb2.TASK_STATE_INPUT_REQUIRED:
+            raise InvalidParamsError(message=f"Task '{task_id}' nao esta aguardando escolha")
+
+        decision = interpret_client_decision(text)
+        if decision is None or not decision_is_acceptable(decision, pending):
+            return self._task_store.repeat_pause(task_id, user_msg, text)
+
+        self._task_store.begin_resume(task_id, user_msg, text)
+        try:
+            snapshot = await self._mcp_host.ensure_discovered(trace=record.trace)
+            mcp_result = await self._mcp_host.call_tool_raw(
+                pending.tool_name,
+                pending.original_arguments.as_mcp_dict(),
+                trace=record.trace,
+                input_responses=build_retry_input_responses(pending, decision),
+                request_state=pending.request_state,
+            )
+            if isinstance(mcp_result, types.InputRequiredResult):
+                return self._task_store.fail_task(task_id, TECHNICAL_MCP_FAILURE_MESSAGE)
+            return self._apply_call_result(task_id, mcp_result, snapshot.policy_version)
+        except DefensiveElicitationCalledError:
+            raise
+        except Exception:
+            return self._task_store.fail_task(task_id, TECHNICAL_MCP_FAILURE_MESSAGE)
+
+    def _apply_call_result(
+        self,
+        task_id: str,
+        mcp_result: types.CallToolResult,
+        policy_version: str,
+    ) -> a2a_pb2.Task:
+        """Aplica o resultado MCP. isError precede sucesso e cancelamento."""
+        if mcp_result.is_error:
+            return self._task_store.fail_task(task_id, extract_tool_error_text(mcp_result))
+
+        structured = mcp_result.structured_content
+        reservado = structured.get("reservado") if isinstance(structured, Mapping) else None
+        motivo = structured.get("motivo") if isinstance(structured, Mapping) else None
+        if reservado is True:
+            reservation_data = extract_reservation_payload(mcp_result)
+            return self._task_store.complete_task(
+                task_id,
+                reservation_data,
+                policy_version=policy_version,
+            )
+        if reservado is False and isinstance(motivo, str) and motivo.strip():
+            return self._task_store.cancel_task(task_id, "Reserva recusada.")
+        return self._task_store.fail_task(task_id, TECHNICAL_MCP_FAILURE_MESSAGE)
 
     async def on_list_tasks(
         self,
