@@ -42,6 +42,28 @@ API pública compatível; se não for possível, registrar a limitação no READ
 005 e manter o requisito reprovado. Não afirmar que o suporte a form, sozinho,
 resolve a divergência, nem modificar o SDK/constituição para ocultá-la.
 
+**Evidência executada em T006 (`test_mcp_host.py`)**: A execução de
+`TestMCPHostFoundational.test_gate_fr008_capabilities_forma_exata` com `mcp==2.3.0`
+instalado e `Client(url, mode="2026-07-28", elicitation_callback=...)` observou no
+wire HTTP real `io.modelcontextprotocol/clientCapabilities = {"elicitation": {"form": {}, "url": {}}}`
+e reprovou a asserção exata:
+`AssertionError: {'elicitation': {'form': {}, 'url': {}}} != {'elicitation': {'form': {}}}`.
+Diferentemente de `sampling_capabilities`, `Client` e `ClientSession` em `mcp==2.3.0`
+não expõem parâmetro público `elicitation_capabilities`, e `_make_modern_stamp`
+sobrescreve `meta["io.modelcontextprotocol/clientCapabilities"]` a cada `send_request`.
+O gate FR-008 permanece explicitamente **REPROVADO** sem monkeypatch, API privada ou
+envelope artesanal.
+
+**Consolidação US3 em T031 (`test_mcp_host.py` e `test_agente_direto.py`)**:
+1. **Saída observada de capabilities do pin instalado (`mcp==2.3.0`)**:
+   - Em todas as operações (`tools/list`, `resources/read`, `tools/call`), o wire HTTP real carrega:
+     `"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {"elicitation": {"form": {}, "url": {}}}, ...}`.
+   - A inspeção de PyPI confirmou que `mcp==2.3.0` é a última release v2 publicada (`pip index versions mcp --pre`), sem API pública alternativa para restringir `ElicitationCapability` apenas a `form`. O requisito exato de FR-008 (`{"elicitation": {"form": {}}}`) permanece **REPROVADO** em `test_gate_fr008_capabilities_forma_exata` (`Ran 8 tests in 0.274s — FAILED (failures=1)`), sem afirmar equivalência nem alterar a constituição.
+2. **Evidência das APIs públicas e do raw MRTR**:
+   - `session.list_tools(params=PaginatedRequestParams(cursor=..., _meta=...))`, `session.read_resource(uri, meta=..., allow_input_required=False)` e `session.call_tool(name, arguments, input_responses=..., request_state=..., meta=..., allow_input_required=True)` preservam cabeçalhos espelhados (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) e retornam `InputRequiredResult` cru com o marcador opaco intacto (`v1.OPAQUE_SENTINEL_MARKER_NOT_BASE64_!@#$%^&*()`), sem invocar `defensive_elicitation_callback`, sem retry automático e sem expor `requestState` nos serializers públicos de `Task` ou `AgentCard`.
+3. **Evidência do perfil A2A sem header (`StarterProfileContextBuilder`)**:
+   - `TestAgenteUS1DescobertaEReservaLivre` e `TestAgenteUS3DescobertaWireTraceparentEStderr` comprovaram que requisições v1 sem `A2A-Version` recebem contexto `1.0` apenas quando o cabeçalho está ausente em `/a2a`, enquanto cabeçalhos explícitos (`1.0` vs `0.3`/`2.0`/`invalid`) são preservados e validados pelo SDK.
+
 ## R04 — Estado, parsing e rastreamento
 
 **Decision**: Task pública somente com identidade, estado, histórico e artifact; parser por gramática fixa; contexto de trace explícito por Task/chamada; política extraída do resource.
