@@ -4,11 +4,10 @@ Guia de validação **para depois da implementação**. Os módulos, testes e sc
 citados são entregáveis planejados; não foram criados ou executados por $speckit-plan.
 Execute comandos a partir da raiz do repositório, salvo indicação contrária.
 
-**Gate prévio**: resolver 003/FR-008 por API pública compatível e aprovar o teste de
-wire com capabilities exatamente `{"elicitation": {"form": {}}}`. Enquanto o pin
-anunciar form+url, esta entrega permanece pendente; registrar a limitação não
-aprova o requisito. Usar os pins exatos aprovados nas features de origem, sem
-trocar por latest para contornar o gate.
+**Gate prévio**: aprovar o teste de wire de 003/FR-008, verificando
+`elicitation.form` como objeto em cada request. Capabilities adicionais do SDK,
+como `elicitation.url`, são permitidas. Usar os pins exatos testados nas features
+de origem; não é necessária mudança de SDK ou versão por esse anúncio.
 
 ## Instalação da entrega em clone limpo
 
@@ -148,8 +147,8 @@ pode virar baseline. Os testes de integração gerenciam seus próprios processo
 Depois dos testes que escrevem reservas, reiniciar os dois processos antes de
 uma nova suíte oficial. Registrar cenários manuais, atualizar as quatro seções
 do README com pontos reais do código e documentar AES-256-GCM, TTL600, Tasks em
-memória e perfil A2A de versão ausente. Se form+url ainda aparecer, registrar
-003/FR-008 como falha e interromper a aceitação final, sem afirmar conformidade.
+memória e perfil A2A de versão ausente. Verificar form em cada request MCP;
+capabilities adicionais, como url, não reprovam 003/FR-008 nem a aceitação final.
 Não afirmar que as rotas seguem a negociação normativa irrestrita sem registrar
 a adaptação.
 

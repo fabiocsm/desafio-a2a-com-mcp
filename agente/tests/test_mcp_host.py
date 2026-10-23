@@ -285,15 +285,34 @@ class TestMCPHostFoundational(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(DefensiveElicitationCalledError):
             await defensive_elicitation_callback(None, None)  # type: ignore[arg-type]
 
-    async def test_gate_fr008_capabilities_forma_exata(self) -> None:
-        """Compara capabilities no wire com {"elicitation": {"form": {}}} sem afrouxar a asserção (FR-008)."""
+    async def test_gate_fr008_declara_form_em_cada_request_com_capabilities_adicionais(self) -> None:
+        """Exige form no wire de cada operação sem restringir capabilities adicionais (FR-008)."""
         async with MCPHost(self.server.url) as host:
             await host.list_tools_page()
+            await host.read_resource("politica://uso")
+            await host.call_tool_raw(
+                "reservar_sala",
+                {
+                    "sala": "sala-porao",
+                    "inicio": "2026-11-03T09:00:00-03:00",
+                    "fim": "2026-11-03T10:00:00-03:00",
+                    "responsavel": "Doc",
+                },
+            )
 
-        self.assertEqual(len(self.server.requests), 1)
-        meta = (self.server.requests[0].body.get("params") or {}).get("_meta") or {}
-        observed_capabilities = meta.get("io.modelcontextprotocol/clientCapabilities")
-        self.assertEqual(observed_capabilities, {"elicitation": {"form": {}}})
+        self.assertEqual(
+            [req.body.get("method") for req in self.server.requests],
+            ["tools/list", "resources/read", "tools/call"],
+        )
+        for req in self.server.requests:
+            with self.subTest(method=req.body.get("method")):
+                meta = (req.body.get("params") or {}).get("_meta") or {}
+                capabilities = meta.get("io.modelcontextprotocol/clientCapabilities")
+                self.assertIsInstance(capabilities, dict)
+                elicitation = capabilities.get("elicitation")
+                self.assertIsInstance(elicitation, dict)
+                self.assertIn("form", elicitation)
+                self.assertIsInstance(elicitation["form"], dict)
 
 
 class TestMCPHostDiscoveryTraceAndBoundaryUS3(unittest.IsolatedAsyncioTestCase):

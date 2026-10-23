@@ -32,9 +32,9 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 ## R04 — Documentação de diferenças dos SDKs
 
-**Decision**: Documentar AEAD oficial, raw MCP, perfil A2A sem header e GetTask como Task direta no SDK, citando fonte e efeito observável. Registrar o anúncio form+url como pendência de conformidade de 003/FR-008, não como variação aceita; manter a aceitação da 005 bloqueada até solução por API pública compatível e teste do wire exato aprovado. Se a correção exigir mudança de pin, consolidar somente versões exatas efetivamente validadas nas duas aplicações e nas constraints.
+**Decision**: Documentar AEAD oficial, raw MCP, perfil A2A sem header e GetTask como Task direta no SDK, citando fonte e efeito observável. Registrar o anúncio form+url como comportamento permitido do SDK: 003/FR-008 exige form por request, sem exclusividade. Validar esse requisito no wire e consolidar somente versões exatas efetivamente testadas nas aplicações e constraints.
 
-**Rationale**: O enunciado aceita apenas as variações explicitadas, como GetTask direto, e exige evidência de limitações reais sem reescrever protocolo. Essa documentação não dispensa capabilities exatas nem permite aprovar um requisito ausente. O perfil A2A também deve ser descrito sem prometer negociação normativa irrestrita.
+**Rationale**: O enunciado aceita apenas as variações explicitadas, como GetTask direto, e exige evidência de limitações reais sem reescrever protocolo. A validação exige a capability form em cada request; capabilities adicionais não representam requisito ausente. O perfil A2A também deve ser descrito sem prometer negociação normativa irrestrita.
 
 **Alternatives considered**: Esconder adaptação, imitar snapshots de outra stack ou modificar SDK/validador tornaria a entrega difícil de avaliar.
 
@@ -57,8 +57,8 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 ## Resultado da pesquisa
 
-Design de entrega decomposto, com dependência de conformidade ainda pendente em
-003/FR-008 e sem solicitação de dispensa ao usuário. Os pins de base foram
+Design de entrega decomposto, com gate 003/FR-008 definido pela presença de form
+em cada request e capabilities adicionais permitidas. Os pins de base foram
 verificados em metadados publicados; a combinação MCP/A2A/Starlette/Uvicorn/SSE/Pydantic teve
 resolução pip dry-run bem-sucedida direcionada a Python 3.12, sem instalação no
 projeto. Isso demonstra resolução de dependências, não execução da aplicação nem

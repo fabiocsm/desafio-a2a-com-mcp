@@ -48,27 +48,26 @@ Instalar o agente como pacote src separado, usando `python -m ponte_agente`. Con
 Gate de entrada: requisitos e restrições constitucionais revisados antes das decisões
 específicas. Gate de saída: design revisto após research, modelos e contratos.
 A avaliação abaixo é de design; não declara que testes da aplicação passaram.
-O gate de FR-008 permanece reprovado: o anúncio form+url do pin escolhido não
-comprova a forma exata exigida. Não declarar conformidade desse requisito enquanto
-não houver solução por API pública compatível e teste do wire aprovado.
+O gate de FR-008 verifica `elicitation.form` como objeto em cada request MCP.
+Capabilities adicionais do SDK, como `elicitation.url`, são permitidas; o gate
+não compara o objeto inteiro. A execução dos testes de wire comprova o requisito.
 
 | Princípio | Antes de Phase 0 | Após Phase 1 / evidência de design |
 | --- | --- | --- |
 | I. Fronteiras e responsabilidade | PASS — requisito preservado | PASS — Host usa HTTP real; nenhuma importação de ponte_mcp nem cálculo de política/alternativas no agente. |
-| II. Estado explícito | PASS — requisito preservado | BLOQUEADO em FR-008 — Metadados/headers por request e Task explícita estão previstos, mas o pin anuncia form+url; T005/T006/T031 exigem comprovar o contrato exato. |
+| II. Estado explícito | PASS — requisito preservado | PASS — Metadados/headers por request e Task explícita; T005/T006/T031 verificam form em cada operação, permitindo capabilities adicionais. |
 | III. Integridade/opacidade | PASS — requisito preservado | PASS — Sem acesso à chave ou abertura de token; isolamento privado da continuação será concluído na 004. |
 | IV. Contratos/determinismo | PASS — requisito preservado | PASS — SDK A2A v1 e parser fixo, sem LLM, modelos/enums atuais e erros preservados. |
-| V. Conformidade/rastreio | PASS — requisito preservado | CONDICIONAL — Descoberta, política e trace têm testes planejados; registrar limitação não aprova FR-008 nem autoriza declarar entrega concluída. |
+| V. Conformidade/rastreio | PASS — requisito preservado | PASS — Descoberta, política, form por request e trace têm testes planejados; a entrega integral continua dependendo da execução dos gates das specs 004/005. |
 
 Há uma divergência normativa do starter: os requests A2A dos exemplos/validador omitem A2A-Version, mas usam métodos v1.0. O SDK exige versão 1.0 no contexto. Usar o ponto público ServerCallContextBuilder para estabelecer 1.0 apenas quando o header estiver ausente em /a2a, preservando versões explícitas e sem ativar compatibilidade 0.3. Documentar esse perfil e sua evidência; não afirmar negociação normativa irrestrita.
 
 A API MCP 2.3.0 anuncia form e url ao registrar elicitation_callback, conforme
-evidência em research.md. Registrar callback defensivo e usar
-session.call_tool(..., allow_input_required=True) evita resposta automática, mas
-não resolve o anúncio adicional. T005 compara o wire ao requisito exato;
-T006/T031 devem buscar solução compatível por API pública e registrar a limitação
-com seu gate reprovado enquanto ela persistir. Não usar monkeypatch, atributos
-privados, envelope artesanal nem enfraquecer a asserção ou a constituição.
+evidência em research.md. Esse anúncio atende FR-008 porque inclui form.
+Registrar callback defensivo e usar session.call_tool(..., allow_input_required=True)
+evita resposta automática. T005/T006/T031 inspecionam form em cada request e
+permitem capabilities adicionais. Não usar monkeypatch, atributos privados ou
+envelope artesanal; não é necessária troca de pin por esse anúncio.
 
 ## Project Structure
 
@@ -118,7 +117,7 @@ servidor-mcp/            # outro pacote/processo, sem importação pelo agente
 3. Implementar ServerCallContextBuilder para o perfil do starter e capturar traceparent do request em contexto explícito. Header ausente assume a versão fixa do endpoint; header incompatível não é silenciosamente substituído.
 4. Usar tipos Protobuf a2a.types.a2a_pb2, Part(text=...), enums ROLE_* e TASK_STATE_*, deixando o SDK serializar camelCase e envelopes. Não usar TextPart/kind ou classes de aplicação legadas.
 5. Fazer descoberta tools/list explícita antes do primeiro tools/call e ler politica://uso. Guardar catálogo e versão obtida como dados de aplicação, nunca como sessão de capabilities.
-6. Verificar o anúncio exato de capabilities desde a fundação (T005/T006), mantendo FR-008 reprovado se o SDK anunciar campos adicionais. Efetuar calls pelo caminho client.session.call_tool(..., allow_input_required=True, meta=trace_meta), com callback defensivo que falha se chamado. Não usar Client.call_tool, que auto-resolve MRTR.
+6. Verificar a presença de elicitation.form como objeto em cada request desde a fundação (T005/T006), permitindo capabilities adicionais anunciadas pelo SDK. Efetuar calls pelo caminho client.session.call_tool(..., allow_input_required=True, meta=trace_meta), com callback defensivo que falha se chamado. Não usar Client.call_tool, que auto-resolve MRTR.
 7. Parsear sala/inicio/fim/responsavel no texto fixo e criar Task com UUIDs próprios, SUBMITTED/WORKING e histórico. Nenhuma validação de negócio é repetida antes da resposta MCP.
 8. Mapear complete com sucesso para COMPLETED/artifact reserva; isError para FAILED com mensagem original; falha técnica/protocolo após criar Task também vira FAILED, com mensagem `Falha ao executar pedido no servidor MCP` e sem exceção/corpo bruto. GetTask funcional já integra T016 para permitir instanciar o RequestHandler; US2 completa os cenários durante WORKING e de identidade desconhecida. A recusa de envio para terminal acontece antes de MCP. Entrada malformada antes de criar Task usa erro de parâmetro; identidade desconhecida usa TaskNotFound.
 9. Testar HTTP entre dois processos, headers/metadata nos requests reais, origem da política, trace-id, terminalidade e GetTask. Preparar o retorno cru input_required para a integração 004, sem inventar sucesso/falha substituto.
@@ -140,7 +139,7 @@ Os casos abaixo são validações planejadas, não resultados de testes já exec
 | FR-005 | Parser fixo, determinismo e ausência de LLM. |
 | FR-006 | tools/list observado antes do primeiro tools/call. |
 | FR-007 | Política extraída do resource e versão no artifact. |
-| FR-008 | T005/T006/T031: metadata moderna e capabilities na forma exata em cada request; gate reprovado enquanto houver divergência do pin. |
+| FR-008 | T005/T006/T031: metadata moderna e elicitation.form como objeto em cada request; capabilities adicionais permitidas. |
 | FR-009 | Headers espelhados pelo SDK em cada chamada. |
 | FR-010 | Trace-id do A2A aparece no MCP; contexto isolado por Task. |
 | FR-011 | Task COMPLETED e artifact reserva com JSON correto. |
@@ -155,9 +154,8 @@ Usar nomes de classes da linha A2A 0.3 gera envelopes errados. O SDK atual devol
 
 ## Complexity Tracking
 
-Sem exceções de complexidade propostas. Há uma pendência de conformidade FR-008:
-o pin MCP escolhido anuncia form+url; sua documentação não constitui exceção
-constitucional. As tarefas exigem solução compatível e teste aprovado antes de
-declarar esse gate cumprido. O perfil A2A está documentado em research.md e no
-contrato. Não alterar SDKs, arquivos protegidos ou regras do desafio. Não há camada
+Sem exceções de complexidade propostas. O anúncio form+url do pin MCP atende
+FR-008; os testes verificam form por request, sem proibir capabilities adicionais.
+O perfil A2A está documentado em research.md e no contrato. Não alterar SDKs,
+arquivos protegidos ou regras do desafio. Não há camada
 de serviços, repositório abstrato, banco, autenticação ou instrumentação adicional.

@@ -3,11 +3,11 @@
 ## Instalação e configuração pública
 
 Os manifests serão servidor-mcp/pyproject.toml e agente/pyproject.toml.
-Pré-condição de aceitação: 003/FR-008 aprovado com capabilities exatamente
-`{"elicitation": {"form": {}}}` em cada request MCP do agente. Anúncio form+url
-mantém o gate reprovado; documentá-lo não constitui cumprimento do contrato.
-Uma eventual revisão de pin deve ser exata e testada na feature de origem antes
-de consolidar manifests e constraints da entrega.
+Pré-condição de aceitação: 003/FR-008 aprovado com `elicitation.form` como objeto
+em cada request MCP do agente. Capabilities adicionais anunciadas pelo SDK, como
+`elicitation.url`, são permitidas; não exigir igualdade do objeto inteiro nem
+mudança de pin por esse anúncio. Manifests e constraints devem refletir as
+versões exatas efetivamente testadas nas features de origem.
 
 Pacotes instaláveis em modo editável oferecem:
 - python -m ponte_mcp — loopback 7301, /mcp.

@@ -49,7 +49,7 @@ A2A-Version: 1.0. Versão explícita incompatível deve ser recusada.
   - `POST /a2a` (`SendMessage` para `sala-porao` em `2026-11-03T09:00:00-03:00` a `2026-11-03T10:00:00-03:00`, `responsavel=Doc`) criou Task com `id` e `contextId` UUID próprios (não fixados), transitou por `TASK_STATE_SUBMITTED` → `TASK_STATE_WORKING` → `TASK_STATE_COMPLETED` e produziu `artifact` `reserva` com JSON textual contendo `reserva`, `sala`, `inicio`, `fim`, `responsavel` e `politica: "2026-11-01"` lida do resource `politica://uso`.
   - Testado em processos reiniciados sem header `A2A-Version` e com `A2A-Version: 1.0`; versões explícitas incompatíveis (`0.3`, `2.0`, `invalid`) foram recusadas com erro JSON-RPC.
   - Consulta subsequente ao servidor MCP via `consultar_disponibilidade` confirmou `livre: false` para o intervalo reservado.
-  - **Distinção de escopo**: Gate FR-008 permanece pendente/reprovado devido ao anúncio adicional `url` em `mcp==2.3.0`; a aceitação final das 36 verificações oficiais depende da conclusão das specs `004` e `005`.
+  - **Distinção de escopo**: FR-008 exige form em cada request, permitindo o anúncio adicional `url` de `mcp==2.3.0`; a aceitação final das 36 verificações oficiais depende da conclusão das specs `004` e `005`.
 
 ### Evidências executadas (US2 — T024)
 
@@ -70,7 +70,7 @@ A2A-Version: 1.0. Versão explícita incompatível deve ser recusada.
 ### Evidências executadas (US3 — T032)
 
 - **Comandos executados**:
-  - `.venv/bin/python -m unittest discover -s agente/tests -p 'test_mcp_host.py' -v` → `Ran 8 tests in 0.274s — FAILED (failures=1)` (7 aprovados; 1 falha esperada no gate estrito `test_gate_fr008_capabilities_forma_exata`)
+  - A execução original de `.venv/bin/python -m unittest discover -s agente/tests -p 'test_mcp_host.py' -v` teve 7 aprovações e uma falha causada pela comparação integral de capabilities. Essa interpretação foi corrigida: o gate atual verifica form em cada request e aceita capabilities adicionais. A nova execução está registrada em **Quality gates atuais**.
   - `.venv/bin/python -m unittest discover -s agente/tests -p 'test_agente_direto.py' -v` → `Ran 5 tests in 5.827s — OK`
 - **Descoberta explícita e leitura de resource antes do primeiro `tools/call`**:
   - Captura HTTP real (`TransparentMCPObserverProxy` e `ObservingMCPHTTPServer`) comprovou a sequência exata `tools/list` (incluindo paginação via `nextCursor` quando presente) → `resources/read` (`politica://uso`) → `tools/call` (`reservar_sala`).
@@ -81,8 +81,8 @@ A2A-Version: 1.0. Versão explícita incompatível deve ser recusada.
   - Três Tasks independentes enviadas ao mesmo processo do agente com `traceparent` A (`4bf92f3577b34da6a3ce929d0e0e4736`), `traceparent` B (`99999999999999999999999999999999`) e sem `traceparent` comprovaram no wire HTTP e no `stderr` do `ponte_mcp` (`[ponte_mcp] method=... id=... traceparent=...`) que todas as operações de cada Task preservam seu `trace-id` original e que a Task sem header não herda `traceparent` anterior.
 - **Fronteira `input_required` (FR-015) e resultado de T031**:
   - `InputRequiredResult` com marcador opaco `v1.OPAQUE_SENTINEL_MARKER_NOT_BASE64_!@#$%^&*()` foi recebido cru sem acionar o callback defensivo, sem retry automático e sem expor o marcador em `Task` ou `AgentCard`.
-  - **Limitações para o README da 005 (sem tratar como PASS)**:
-    1. **Gate FR-008 (`mcp==2.3.0`)**: O SDK oficial `mcp==2.3.0` anuncia `{"elicitation": {"form": {}, "url": {}}}` sempre que `elicitation_callback` é registrado, sem API pública para omitir `url`. O gate `test_gate_fr008_capabilities_forma_exata` permanece **FAIL** (não mascarado).
+  - **Comportamentos do SDK a documentar na 005**:
+    1. **Capabilities FR-008 (`mcp==2.3.0`)**: O SDK anuncia `{"elicitation": {"form": {}, "url": {}}}`. A presença de form atende ao requisito; o anúncio adicional url é permitido, sem exigir troca de SDK ou pin. O fluxo da aplicação continua usando `mode: form` e retorno raw.
     2. **Perfil A2A v1 sem `A2A-Version`**: O starter e o validador enviam métodos v1.0 sem o header `A2A-Version`; `StarterProfileContextBuilder` aplica `1.0` apenas quando o header está ausente em `/a2a`, preservando e validando qualquer header explícito.
 
 ## Testes previstos
@@ -121,14 +121,14 @@ subprocessos e limpa o estado.
       [mcp] method=resources/read id=2 traceparent=00-4bf92f3577b34da6a3ce929d0e0e4736-ae52e1aa3b18b8bd-01
       [mcp] method=tools/call id=3 traceparent=00-4bf92f3577b34da6a3ce929d0e0e4736-753372b31629f658-01
       ```
-  - Bateria completa `python -m unittest discover -s agente/tests -p 'test_*.py' -v` no venv novo: `Ran 22 tests in 7.098s — FAILED (failures=1)` (21 testes aprovados; 1 falha estrita esperada em `test_gate_fr008_capabilities_forma_exata`).
+  - A bateria original no venv novo executou 22 testes, com 21 aprovações e uma falha na comparação integral de capabilities, agora removida por exigir uma exclusividade inexistente no enunciado. O resultado da bateria corrigida está em **Quality gates atuais**; não atribuir essa nova execução ao venv histórico.
   - Bateria de regressão do servidor MCP (`python -m unittest discover -s servidor-mcp/tests -p 'test_*.py' -v`): `Ran 45 tests in 13.554s — OK`.
 
 ### Auditoria dos cinco princípios constitucionais e arquivos protegidos (T035)
 
-- `git diff --stat dados/ validador/ exemplos/ README.md` → vazio (nenhum arquivo protegido alterado, movido ou reescrito; `README.md` da raiz preservado para a spec `005`).
+- `git diff --stat dados/ validador/ exemplos/` deve permanecer vazio. O README da raiz recebeu apenas o esclarecimento de que form é obrigatório e capabilities adicionais são permitidas; a substituição pelas quatro seções finais continua na spec `005`.
 - **Princípio I (Fronteiras e responsabilidade)**: `ponte_mcp` e `ponte_agente` executam em processos separados comunicando-se exclusivamente por HTTP (`MCP_URL`); toda regra de sala, janela, duração, conflito e alternativas reside no servidor MCP.
-- **Princípio II (Estado explícito) — Gate FR-008 REPROVADO**: Cada operação MCP envia `_meta` e cabeçalhos espelhados explícitos e cada Task possui `id`/`contextId`/`trace` próprios sem herança entre requests; contudo, o pin `mcp==2.3.0` anuncia `{"elicitation": {"form": {}, "url": {}}}` no wire, mantendo o gate estrito FR-008 reprovado até solução compatível por API pública.
+- **Princípio II (Estado explícito)**: Cada operação MCP envia `_meta`, form e cabeçalhos espelhados, e cada Task possui `id`/`contextId`/`trace` próprios sem herança entre requests. Capabilities adicionais do SDK, como url, são permitidas; o gate verifica form em cada request.
 - **Princípio III (Integridade e opacidade)**: O agente não recebe `REQUEST_STATE_SECRET`, não decodifica nem altera `requestState`, e mantém `InputRequiredResult` cru isolado dos serializers públicos.
 - **Princípio IV (Contratos e determinismo)**: Gramática fixa determinística sem LLM, pins exatos em `agente/pyproject.toml`, ausência de extras fora do escopo (`all`, `telemetry`, `sqlalchemy`, `fastapi`), e preservação exata das mensagens de domínio.
 - **Princípio V (Conformidade e rastreio)**: Descoberta `tools/list` antes do primeiro `tools/call`, versão da política lida da primeira linha de `politica://uso`, propagação do `trace-id` original para todos os requests MCP da Task e registro em `stderr`.
@@ -140,7 +140,7 @@ subprocessos e limpa o estado.
 | FR-001, FR-002, FR-003 | Atendido | `app.py`, ` __main__.py`, `test_agente_direto.py` (processos independentes, card v1.0, `/a2a` JSON-RPC, `StarterProfileContextBuilder`) |
 | FR-004, FR-005 | Atendido | `tasks.py`, `handler.py`, `test_tasks.py` (UUIDs `id`/`contextId` próprios, `SUBMITTED` → `WORKING`, gramática fixa sem LLM) |
 | FR-006, FR-007, FR-009, FR-010 | Atendido | `mcp_host.py`, `test_mcp_host.py`, `test_agente_direto.py` (`tools/list` paginado antes de `tools/call`, `politica://uso`, headers espelhados, `traceparent` por Task sem herança) |
-| FR-008 | **BLOQUEADO / FAIL** | `test_gate_fr008_capabilities_forma_exata` reprova o anúncio adicional `url` de `mcp==2.3.0` (`{'elicitation': {'form': {}, 'url': {}}}`) |
+| FR-008 | Atendido | `test_gate_fr008_declara_form_em_cada_request_com_capabilities_adicionais` exige form em tools/list, resources/read e tools/call, permitindo capabilities adicionais; execução em **Quality gates atuais** |
 | FR-011, FR-012, FR-013, FR-014 | Atendido (escopo direto) | `tasks.py`, `handler.py`, `test_tasks.py`, `test_agente_direto.py` (`COMPLETED` com artifact `reserva`, `FAILED` com mensagem exata da tool, `GetTask` direto inclusive em `WORKING`, guarda terminal) |
 | FR-015 | Atendido | Fronteira `003`/`004` preservada: `InputRequiredResult` cru sem callback automático, sem falso terminal e sem exposição de `requestState` |
 | SC-001, SC-002, SC-003, SC-004, SC-005 | Atendido | Comprovados em `test_tasks.py`, `test_mcp_host.py` e `test_agente_direto.py` |
@@ -152,13 +152,35 @@ subprocessos e limpa o estado.
 
 ## Gate de capabilities MCP
 
-FR-008 exige `{"elicitation": {"form": {}}}` em cada request. A pesquisa do pin
-MCP 2.3.0 identificou anúncio adicional url; essa divergência mantém o gate
-reprovado, mesmo quando a reserva livre funcionar. T005/T006/T031 exigem observar
-o wire real, buscar solução por API pública compatível e registrar evidência.
-Não relaxar a asserção, modificar atributos privados ou declarar PASS por haver
-somente suporte a form. A limitação e seu resultado real devem chegar ao README
-da 005, sem apresentar documentação como substituta de conformidade.
+FR-008 exige `elicitation.form` como objeto em cada request, além da versão e dos
+headers espelhados. Capabilities adicionais anunciadas pelo SDK, como
+`elicitation.url`, são permitidas; não comparar o objeto inteiro nem migrar de
+SDK por esse anúncio. O fluxo da aplicação continua usando `mode: form`, sem
+callback ou retry automático, conforme FR-015.
+
+T005/T006/T031 verificam os três métodos no wire. A suíte do MCP mantém os casos
+negativos de capability form ausente, elicitation genérica e url-only: em conflito
+que exige form, devem gerar `-32021`, HTTP 400 e requiredCapabilities.
+
+## Quality gates atuais
+
+Executados em 2026-10-22 no ambiente `.venv` existente, após o esclarecimento da
+constituição 1.0.1. Os resultados históricos de comparação integral não são mais
+um gate de aceitação; o teste atual exige form por request e permite capabilities
+adicionais, incluindo url. Nenhum SDK, pin ou código de execução foi alterado
+para remover o anúncio adicional.
+
+| Comando na raiz | Resultado |
+| --- | --- |
+| `.venv/bin/python -m unittest discover -s agente/tests -p 'test_*.py' -v` | 22 testes, OK; inclui FR-008 nos três métodos MCP via HTTP real |
+| `.venv/bin/python -m unittest discover -s servidor-mcp/tests -p 'test_*.py' -v` | 45 testes, OK; inclui matriz de capabilities por request e rejeição sem form |
+| `.venv/bin/python -m compileall -q agente/src agente/tests servidor-mcp/src servidor-mcp/tests` | Saída 0 |
+| `.venv/bin/python -m pip check` | `No broken requirements found.` |
+
+O gate de capabilities não exige igualdade do objeto inteiro. Os gates de
+headers, trace, retorno raw, privacidade e erros de domínio continuam obrigatórios.
+Esses resultados validam as suítes implementadas de 001–003; não comprovam as
+36 verificações da entrega integral, cuja ponte ainda depende da spec 004.
 
 ## Critérios de passagem para 004/005
 

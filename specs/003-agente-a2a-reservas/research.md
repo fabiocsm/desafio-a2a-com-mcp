@@ -26,43 +26,36 @@ inspeção somente leitura; não instalaram dependências no projeto.
 
 **Decision**: Usar Client(url, mode='2026-07-28', elicitation_callback=callback_defensivo) e chamadas client.session.call_tool com allow_input_required=True. tools/list e leitura de resource permanecem explícitos.
 
-**Rationale**: O callback permite o anúncio exigido de form, mas o caminho raw evita que ele decida pelo cliente A2A. O SDK injeta envelope e headers. A versão fixa evita discovery/initialize automático sem trace contextualizável.
+**Rationale**: O callback permite anunciar form; o caminho raw evita que ele decida pelo cliente A2A. O SDK injeta envelope e headers. A versão fixa evita discovery/initialize automático sem trace contextualizável.
 
-**Alternatives considered**: Client.call_tool fecha MRTR automaticamente. Requests HTTP artesanais eliminariam o benefício do SDK. A API desta versão anuncia também url; documentar essa limitação em vez de alterar atributos privados.
+**Capabilities e gate FR-008**: Exigir `elicitation.form` como objeto em cada
+request MCP, sem comparar o objeto inteiro de capabilities. O anúncio observado
+com `mcp==2.3.0` é `{"elicitation": {"form": {}, "url": {}}}` em `tools/list`,
+`resources/read` e `tools/call`; ele atende à exigência de form. Anunciar `url`
+não habilita um fluxo de elicitation URL na aplicação, que continua usando form.
 
-**Gate FR-008 — reprovado no design atual**: O anúncio adicional não comprova a
-forma exata exigida pela spec e constituição. Na revisão de tarefas em 2026-10-22,
-a leitura do código oficial da tag v2.3.0 confirmou que `_build_capabilities`
-constrói `ElicitationCapability(form=..., url=...)` quando há callback; `adopt`
-instala esse anúncio, e `_make_modern_stamp` grava as capabilities em cada request.
-Esses símbolos são evidência somente leitura, não pontos de extensão autorizados.
-Fonte: [ClientSession v2.3.0](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/client/session.py#L571-L605).
-T005/T006/T031 exigem comparação do wire instalado com o contrato e solução por
-API pública compatível; se não for possível, registrar a limitação no README da
-005 e manter o requisito reprovado. Não afirmar que o suporte a form, sozinho,
-resolve a divergência, nem modificar o SDK/constituição para ocultá-la.
+**Correção de interpretação — 2026-10-22**: A exigência local de capabilities
+exclusivamente form foi removida por instrução do mantenedor, conforme a
+constituição 1.0.1. A falha histórica da comparação integral era um defeito no
+gate, não evidência de descumprimento de FR-008. O teste
+`test_gate_fr008_declara_form_em_cada_request_com_capabilities_adicionais`
+inspeciona os três métodos no wire e exige form em cada um, permitindo campos
+adicionais. Não é necessária troca de SDK ou pin por esse anúncio.
 
-**Evidência executada em T006 (`test_mcp_host.py`)**: A execução de
-`TestMCPHostFoundational.test_gate_fr008_capabilities_forma_exata` com `mcp==2.3.0`
-instalado e `Client(url, mode="2026-07-28", elicitation_callback=...)` observou no
-wire HTTP real `io.modelcontextprotocol/clientCapabilities = {"elicitation": {"form": {}, "url": {}}}`
-e reprovou a asserção exata:
-`AssertionError: {'elicitation': {'form': {}, 'url': {}}} != {'elicitation': {'form': {}}}`.
-Diferentemente de `sampling_capabilities`, `Client` e `ClientSession` em `mcp==2.3.0`
-não expõem parâmetro público `elicitation_capabilities`, e `_make_modern_stamp`
-sobrescreve `meta["io.modelcontextprotocol/clientCapabilities"]` a cada `send_request`.
-O gate FR-008 permanece explicitamente **REPROVADO** sem monkeypatch, API privada ou
-envelope artesanal.
+**Evidências de wire e APIs públicas (`test_mcp_host.py` e `test_agente_direto.py`)**:
+1. `session.list_tools(params=PaginatedRequestParams(cursor=..., _meta=...))`,
+   `session.read_resource(uri, meta=..., allow_input_required=False)` e
+   `session.call_tool(..., allow_input_required=True)` carregam versão e
+   capabilities em cada request, com headers espelhados e trace explícito.
+2. O retorno `InputRequiredResult` permanece cru, com estado opaco intacto,
+   sem callback/retry automático e sem exposição em Task ou AgentCard.
+3. `StarterProfileContextBuilder` aplica `1.0` somente quando `A2A-Version` está
+   ausente; versões explícitas são preservadas e validadas pelo SDK.
 
-**Consolidação US3 em T031 (`test_mcp_host.py` e `test_agente_direto.py`)**:
-1. **Saída observada de capabilities do pin instalado (`mcp==2.3.0`)**:
-   - Em todas as operações (`tools/list`, `resources/read`, `tools/call`), o wire HTTP real carrega:
-     `"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {"elicitation": {"form": {}, "url": {}}}, ...}`.
-   - A inspeção de PyPI confirmou que `mcp==2.3.0` é a última release v2 publicada (`pip index versions mcp --pre`), sem API pública alternativa para restringir `ElicitationCapability` apenas a `form`. O requisito exato de FR-008 (`{"elicitation": {"form": {}}}`) permanece **REPROVADO** em `test_gate_fr008_capabilities_forma_exata` (`Ran 8 tests in 0.274s — FAILED (failures=1)`), sem afirmar equivalência nem alterar a constituição.
-2. **Evidência das APIs públicas e do raw MRTR**:
-   - `session.list_tools(params=PaginatedRequestParams(cursor=..., _meta=...))`, `session.read_resource(uri, meta=..., allow_input_required=False)` e `session.call_tool(name, arguments, input_responses=..., request_state=..., meta=..., allow_input_required=True)` preservam cabeçalhos espelhados (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) e retornam `InputRequiredResult` cru com o marcador opaco intacto (`v1.OPAQUE_SENTINEL_MARKER_NOT_BASE64_!@#$%^&*()`), sem invocar `defensive_elicitation_callback`, sem retry automático e sem expor `requestState` nos serializers públicos de `Task` ou `AgentCard`.
-3. **Evidência do perfil A2A sem header (`StarterProfileContextBuilder`)**:
-   - `TestAgenteUS1DescobertaEReservaLivre` e `TestAgenteUS3DescobertaWireTraceparentEStderr` comprovaram que requisições v1 sem `A2A-Version` recebem contexto `1.0` apenas quando o cabeçalho está ausente em `/a2a`, enquanto cabeçalhos explícitos (`1.0` vs `0.3`/`2.0`/`invalid`) são preservados e validados pelo SDK.
+**Alternatives considered**: `Client.call_tool` fecha MRTR automaticamente.
+Requests HTTP artesanais, monkeypatch ou alteração de atributos privados não são
+necessários para anunciar capabilities adicionais. Fonte do comportamento do pin:
+[ClientSession v2.3.0](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/src/mcp/client/session.py).
 
 ## R04 — Estado, parsing e rastreamento
 
@@ -99,8 +92,8 @@ envelope artesanal.
 
 ## Resultado da pesquisa
 
-Decisões de design registradas, com pendência bloqueante de conformidade em FR-008
-e tarefas explícitas para verificá-la/resolvê-la. Os pins foram
+Decisões de design registradas, com gate FR-008 baseado na presença de form em
+cada request, permitindo capabilities adicionais. Os pins foram
 verificados em metadados publicados; a combinação MCP/A2A/Starlette/Uvicorn/SSE/Pydantic teve
 resolução pip dry-run bem-sucedida direcionada a Python 3.12, sem instalação no
 projeto. Isso demonstra resolução de dependências, não execução da aplicação nem

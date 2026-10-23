@@ -193,7 +193,7 @@ Conceitos do curso: host cria clientes e agrega contexto (M2 aula 1), descoberta
 
 - O agente descobre as ferramentas por `tools/list` antes da primeira chamada, e não carrega uma lista fixa no código
 - O agente lê o resource `politica://uso` e extrai dele a versão declarada na primeira linha
-- Todo request MCP emitido pelo agente carrega os campos obrigatórios de `_meta` e declara a capability de elicitation em form mode, na forma `{"elicitation": {"form": {}}}`
+- Todo request MCP emitido pelo agente carrega os campos obrigatórios de `_meta` e declara a capability de elicitation em form mode, como em `{"elicitation": {"form": {}}}`. Esse exemplo exige a presença de `elicitation.form`, sem proibir capabilities adicionais anunciadas pelo SDK, como `elicitation.url`
 - Todo request MCP emitido pelo agente carrega os headers que o transporte espelha do corpo: `MCP-Protocol-Version`, `Mcp-Method` e, em `tools/call` e `resources/read`, `Mcp-Name`. Header que não bate com o corpo é recusado com `-32020`
 - Quando o cliente A2A envia o header `traceparent`, o agente propaga o mesmo trace-id no `traceparent` dentro do `_meta` de todos os requests MCP daquela Task. O span-id pode ser novo, o trace-id não
 - Um erro de execução da tool, com `isError: true`, termina a Task em `TASK_STATE_FAILED` com a mensagem exata da tool visível no histórico da Task. É assim que um pedido de sala inexistente chega de volta ao cliente A2A

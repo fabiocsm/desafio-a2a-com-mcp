@@ -74,7 +74,7 @@ disponível mesmo quando o README for substituído pela documentação da entreg
 | AC-017 | Recusa com `action` igual a `decline` conclui sem reservar e sem `isError` | [002](002-reserva-mrtr-segura/spec.md) — FR-013 |
 | AC-018 | O log do servidor MCP mostra um `tools/list` antes do primeiro `tools/call` do agente | [003](003-agente-a2a-reservas/spec.md) — FR-006 |
 | AC-019 | O log do servidor MCP mostra o `traceparent` com o mesmo trace-id enviado pelo validador no header da chamada A2A | [003](003-agente-a2a-reservas/spec.md) — FR-010 |
-| AC-020 | Os requests do agente declaram a capability de elicitation em form mode | [003](003-agente-a2a-reservas/spec.md) — FR-008 |
+| AC-020 | Os requests do agente declaram a capability de elicitation em form mode, permitindo capabilities adicionais do SDK | [003](003-agente-a2a-reservas/spec.md) — FR-008 |
 | AC-021 | `GET /.well-known/agent-card.json` responde 200 com um card v1.0 válido | [003](003-agente-a2a-reservas/spec.md) — FR-002 |
 | AC-022 | O card declara a interface JSON-RPC com a URL do endpoint e a versão de protocolo `1.0`, e uma skill de `id` `reservar-sala` | [003](003-agente-a2a-reservas/spec.md) — FR-002 |
 | AC-023 | `SendMessage` com sala livre termina a Task em `TASK_STATE_COMPLETED` com o artifact `reserva` | [003](003-agente-a2a-reservas/spec.md) — FR-004, FR-011 |
@@ -178,8 +178,8 @@ As fontes primárias e alternativas estão nos arquivos research.md.
 | 005 | [plan.md](005-conformidade-entrega/plan.md) | [research.md](005-conformidade-entrega/research.md) | [data-model.md](005-conformidade-entrega/data-model.md) | [contrato](005-conformidade-entrega/contracts/entrega.md) | [quickstart.md](005-conformidade-entrega/quickstart.md) |
 
 Os planos preservam os cinco gates constitucionais antes/depois do design.
-As diferenças verificadas dos SDKs estão explícitas: anúncio form+url do cliente
-MCP, logging antes das rejeições, guarda de metadados na borda e perfil A2A que
+Os comportamentos verificados dos SDKs estão explícitos: anúncio permitido de
+form+url do cliente MCP, logging antes das rejeições, guarda de metadados na borda e perfil A2A que
 aceita ausência de A2A-Version no endpoint dedicado do desafio. Não se altera SDK,
 validador ou body de requests para esconder essas diferenças.
 

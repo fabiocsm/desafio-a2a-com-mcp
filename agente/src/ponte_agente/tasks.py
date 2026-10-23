@@ -327,4 +327,3 @@ class TaskStore:
         record.raw_input_required = None
         record.state_transitions.append(a2a_pb2.TASK_STATE_CANCELED)
         return clone_public_task(task)
-

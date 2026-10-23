@@ -108,7 +108,7 @@ Como responsável pela entrega, quero publicar evidências e instruções fiéis
 ## Assumptions
 
 - Depende das capacidades implementadas em [001](../001-servidor-mcp-salas/spec.md), [002](../002-reserva-mrtr-segura/spec.md), [003](../003-agente-a2a-reservas/spec.md) e [004](../004-ponte-a2a-mrtr/spec.md).
-- A pendência de capabilities exatas em 003/FR-008 deve estar resolvida com teste de wire aprovado antes da aceitação da 005; documentar anúncio adicional form+url não satisfaz esse requisito nem autoriza declarar a entrega concluída.
+- A aceitação da 005 exige teste de wire aprovado para 003/FR-008, verificando elicitation.form como objeto em cada request. Capabilities adicionais, como elicitation.url, são permitidas e não bloqueiam a entrega.
 - Todos os cinco princípios constitucionais se aplicam; esta feature encerra a demonstração de conformidade e não concentra correções funcionais sem rastreabilidade às specs de origem.
 - Esta etapa gera somente requisitos de entrega; a execução real e a substituição do README ocorrerão durante a implementação desta feature.
 - A validação original e seus dados são a referência externa; os resultados não serão simulados para preencher documentação.

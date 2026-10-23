@@ -14,12 +14,10 @@ Abrange FR-001 a FR-014 da spec 005 e a rastreabilidade dos 37 critérios no ín
 
 Dependências: 001, 002, 003 e 004 implementadas e verificadas.
 
-**Gate herdado pendente**: a 003 registra FR-008 reprovado enquanto o pin MCP
-anunciar form+url em vez de `{"elicitation": {"form": {}}}`. A 005 não pode iniciar
-sua aceitação ou declarar entrega concluída apenas documentando essa divergência.
-A solução deve ocorrer na 003 por API pública compatível e teste de wire; os pins
-exatos aprovados nessa correção devem ser refletidos nos dois manifests e nas
-constraints da entrega, sem inventar uma versão substituta neste planejamento.
+**Gate herdado de capabilities**: a 003 verifica `elicitation.form` como objeto
+em cada request MCP. Capabilities adicionais, como `elicitation.url`, são permitidas
+e não bloqueiam a 005. A aceitação depende dos testes de wire e dos demais critérios
+da entrega; manter os pins exatos efetivamente validados nos manifests e constraints.
 
 Phase 0 consolidada em [research.md](research.md); Phase 1 detalhada em
 [data-model.md](data-model.md), [contrato](contracts/entrega.md) e
@@ -30,7 +28,7 @@ gerado depois do design; nenhum desses artefatos declara código ou testes execu
 
 **Language/Version**: Python 3.12+ como baseline do projeto; o requisito mínimo externo é Python 3.10+.
 
-**Primary Dependencies**: Pins de base: mcp==2.3.0, a2a-sdk[http-server]==1.2.3, starlette==0.48.0, uvicorn==0.31.1, sse-starlette==3.0.3, pydantic==2.12.0. A aprovação funcional depende da resolução de 003/FR-008; qualquer revisão necessária deve ser exata, validada na capacidade de origem e consolidada nos dois manifests antes das constraints. Ferramentas de evidência usam biblioteca padrão.
+**Primary Dependencies**: Pins de base: mcp==2.3.0, a2a-sdk[http-server]==1.2.3, starlette==0.48.0, uvicorn==0.31.1, sse-starlette==3.0.3, pydantic==2.12.0. A aprovação funcional exige os testes de wire de 003/FR-008, com form por request e capabilities adicionais permitidas; qualquer revisão de dependências deve ser exata e validada antes das constraints. Ferramentas de evidência usam biblioteca padrão.
 
 **Storage**: Somente evidências de execução e arquivo de constraints versionado, sem banco. Estado temporário de um teste MRTR fica fora do repositório; segredo não é artefato de entrega.
 
@@ -59,10 +57,10 @@ A aprovação abaixo é de design; não declara que testes da aplicação passar
 | Princípio | Antes de Phase 0 | Após Phase 1 / evidência de design |
 | --- | --- | --- |
 | I. Fronteiras e responsabilidade | PASS — requisito preservado | PASS — Comandos sobem dois processos independentes; scripts de apoio não fundem os serviços. |
-| II. Estado explícito | PASS — requisito preservado | BLOQUEADO na dependência 003/FR-008 — Exigir capabilities exatas e testes de wire aprovados antes da aceitação; pausa/retry/restart previstos sem sessão. |
+| II. Estado explícito | PASS — requisito preservado | PASS — Exigir form em cada request e testes de wire aprovados, permitindo capabilities adicionais; pausa/retry/restart previstos sem sessão. |
 | III. Integridade/opacidade | PASS — requisito preservado | PASS — Chave gerada localmente, TTL 600 e AEAD documentados; tokens temporários excluídos das evidências públicas. |
 | IV. Contratos/determinismo | PASS — requisito preservado | PASS — Validador original e arquivos protegidos comparados com baseline; nenhuma saída fabricada. |
-| V. Conformidade/rastreio | PASS — requisito preservado | CONDICIONAL — 36 PASS reais, logs e testes manuais são gates futuros e não dispensam resolver 003/FR-008. |
+| V. Conformidade/rastreio | PASS — requisito preservado | PASS — 36 PASS reais, logs, testes de wire e testes manuais são gates previstos para a execução da entrega. |
 
 A aprovação de design não substitui a execução futura. README e evidências só podem afirmar 36 PASS depois da execução com os processos recém-iniciados. Limitações comprovadas do SDK e o perfil de versão A2A serão documentados explicitamente; nenhum critério ausente será marcado como atendido por uma ressalva.
 
@@ -114,7 +112,7 @@ dados/, exemplos/, validador/       # protegidos, sem alterações
 5. Executar os testes das quatro capacidades em bases controladas e corrigir falhas na feature responsável; não modificar casos do validador para obter PASS.
 6. Reiniciar ambos os processos e executar o comando oficial integral; salvar stdout/stderr e código de saída reais, sem deixar pipe para tee ocultar o status.
 7. Separadamente, com base limpa, executar o fluxo manual e registrar descoberta, trace-id, ids distintos, restart, adulteração/expiração, recusa, escolha inválida, duas Tasks e terminalidade.
-8. Atualizar README com as quatro seções, pontos reais do código da ponte, AES-256-GCM/TTL600, armazenamento de Tasks, pins e limitações observadas de capabilities/versão. Colar a última saída completa real do validador.
+8. Atualizar README com as quatro seções, pontos reais do código da ponte, AES-256-GCM/TTL600, armazenamento de Tasks, pins, capabilities observadas e perfil de versão. Colar a última saída completa real do validador.
 9. Conferir o fork público único, estrutura e branch main da entrega final; reproduzir os comandos em clone limpo antes do push final. Este plano não executa push nem altera branches.
 
 ### Validação e rastreabilidade
@@ -168,9 +166,9 @@ O validador muda reservas: toda nova rodada começa com ambos os processos reini
 
 ## Complexity Tracking
 
-Sem exceções de complexidade propostas. Há uma pendência funcional herdada de
-003/FR-008; registrar form+url não constitui exceção constitucional ou aprovação
-da entrega. A execução da 005 exige esse gate resolvido por API pública e teste
-de wire aprovado. O perfil A2A está documentado em research.md e no contrato;
-não alterar SDKs, arquivos protegidos ou regras do desafio. Não há camada de
+Sem exceções de complexidade propostas. O gate 003/FR-008 verifica form por
+request e permite capabilities adicionais, como url. A execução da 005 exige
+testes de wire aprovados e os demais critérios de entrega. O perfil A2A está
+documentado em research.md e no contrato; não alterar SDKs, arquivos protegidos
+ou regras do desafio. Não há camada de
 serviços, repositório abstrato, banco, autenticação ou instrumentação adicional.

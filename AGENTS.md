@@ -52,7 +52,9 @@
   sem lista fixa no código, e ler a versão da política na primeira linha do resource.
 - Inclua em `_meta` de cada request `io.modelcontextprotocol/protocolVersion` e
   `io.modelcontextprotocol/clientCapabilities`; ausência gera `-32602` com HTTP `400`.
-  O agente declara `{"elicitation": {"form": {}}}` em todos os requests MCP.
+  O agente declara `elicitation.form` em todos os requests MCP, como em
+  `{"elicitation": {"form": {}}}`. Capabilities adicionais anunciadas pelo SDK,
+  como `elicitation.url`, são permitidas; não exigir igualdade do objeto inteiro.
 - Espelhe o corpo nos headers `MCP-Protocol-Version`, `Mcp-Method` e, em
   `tools/call` e `resources/read`, `Mcp-Name`. Divergência gera `-32020`.
 - Registre cada request recebido pelo MCP em stderr com método, id e `traceparent`

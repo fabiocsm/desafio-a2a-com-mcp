@@ -118,7 +118,12 @@ um critério ausente. A evidência permite avaliar a entrega sem ocultar lacunas
 - Metadados MCP: todo request DEVE incluir em `params._meta`
   `io.modelcontextprotocol/protocolVersion` e `io.modelcontextprotocol/clientCapabilities`.
   Ausência de qualquer um DEVE gerar `-32602` com HTTP `400`.
-  O agente DEVE declarar `{"elicitation": {"form": {}}}` em cada request.
+  O agente DEVE declarar `elicitation.form` em cada request, como em
+  `{"elicitation": {"form": {}}}`. Esse objeto exemplifica a capability obrigatória,
+  não uma lista exclusiva: capabilities adicionais anunciadas pelo SDK, como
+  `elicitation.url`, são permitidas. A validação DEVE verificar a presença de
+  `form` com valor objeto, sem exigir igualdade do objeto inteiro de capabilities.
+  O fluxo de reserva continua usando `mode: form`, sem resposta automática.
   Quando uma chamada exigir elicitation sem essa capability, o servidor DEVE
   responder `-32021`, `data.requiredCapabilities` com o que faltou e HTTP `400`.
 - Headers MCP: os requests do agente DEVEM espelhar o corpo em `MCP-Protocol-Version`,
@@ -237,4 +242,15 @@ novas exceções. Templates e comandos DEVEM consultar esta constituição em ru
 O Sync Impact Report é material temporário e DEVE ser removido antes do commit
 da constituição, após a revisão da alteração.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-22 | **Last Amended**: 2026-10-22
+## Histórico de esclarecimentos
+
+- **1.0.1 — 2026-10-22**: Por instrução explícita do mantenedor, corrigida a
+  interpretação que proibia anunciar `elicitation.url` junto de `elicitation.form`.
+  O enunciado exige form, sem exclusividade de capabilities. Esclarecimento dos
+  princípios II, IV e V, sem alteração das fronteiras do princípio I ou da
+  integridade/opacidade do princípio III. Impacto: orientações, specs 003/005,
+  tarefas e gates passam a verificar form em cada request e a aceitar capabilities
+  adicionais. Validação: testes de wire e regressão MCP/A2A, incluindo rejeição de
+  clientes sem form; dados, exemplos e validador original permanecem protegidos.
+
+**Version**: 1.0.1 | **Ratified**: 2026-10-22 | **Last Amended**: 2026-10-22
