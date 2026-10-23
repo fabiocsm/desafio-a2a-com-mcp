@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, cast
+from uuid import uuid4
 
-from mcp import Client
 from mcp.client.session import ClientRequestContext, ClientSession, ElicitationFnT
-from mcp.shared.exceptions import MCPError
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.dispatcher import CallOptions
+from mcp.shared.jsonrpc_dispatcher import JSONRPCDispatcher
 import mcp_types as types
 
 from ponte_agente.tasks import RequestTrace
@@ -51,41 +55,19 @@ async def defensive_elicitation_callback(
     )
 
 
-def _is_transport_failure(exc: BaseException) -> bool:
-    """Distingue queda de conexão de erro JSON-RPC, para um único restabelecimento."""
-    if isinstance(exc, MCPError):
-        return False
-    current: BaseException | None = exc
-    seen: set[int] = set()
-    transport_names = {
-        "TransportError",
-        "TimeoutException",
-        "ConnectError",
-        "ReadError",
-        "WriteError",
-        "RemoteProtocolError",
-        "ConnectTimeout",
-        "ReadTimeout",
-        "PoolTimeout",
-        "NetworkError",
-        "HTTPStatusError",
-    }
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, MCPError):
-            return False
-        module_name = type(current).__module__
-        if type(current).__name__ in transport_names and (
-            module_name.startswith("httpx") or module_name.startswith("httpcore")
-        ):
-            status_code = getattr(getattr(current, "response", None), "status_code", None)
-            if type(current).__name__ == "HTTPStatusError":
-                return isinstance(status_code, int) and status_code >= 500
-            return True
-        if isinstance(current, (ConnectionError, TimeoutError)):
-            return True
-        current = current.__cause__
-    return False
+class UniqueRequestDispatcher(JSONRPCDispatcher[Any]):
+    """Delega o wire ao SDK, fornecendo ids únicos pelo CallOptions público."""
+
+    async def send_raw_request(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None,
+        opts: CallOptions | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        options: CallOptions = dict(opts or {})
+        options.setdefault("request_id", f"ponte-{uuid4()}")
+        return await super().send_raw_request(method, params, options, **kwargs)
 
 
 def build_trace_meta(trace: RequestTrace | str | None = None) -> types.RequestParamsMeta | None:
@@ -149,7 +131,7 @@ class MCPHost:
         self._elicitation_callback: ElicitationFnT = (
             elicitation_callback if elicitation_callback is not None else defensive_elicitation_callback
         )
-        self._client: Client | None = None
+        self._opened = False
         self._snapshot: HostSnapshot | None = None
 
     @property
@@ -158,27 +140,14 @@ class MCPHost:
         return self._snapshot
 
     async def open(self) -> MCPHost:
-        """Abre explicitamente o cliente MCP moderno sem fallback legacy/probe."""
-        if self._client is not None:
-            return self
-        client = Client(
-            self.mcp_url,
-            mode=MCP_PROTOCOL_VERSION,
-            client_info=CLIENT_INFO,
-            elicitation_callback=self._elicitation_callback,
-            cache=None,
-        )
-        await client.__aenter__()
-        self._client = client
+        """Habilita o host; cada operação possui e encerra seu transporte HTTP."""
+        self._opened = True
         return self
 
     async def close(self) -> None:
-        """Fecha explicitamente o cliente MCP."""
-        client = self._client
-        self._client = None
+        """Encerra o ciclo lógico do host e limpa a descoberta em cache."""
+        self._opened = False
         self._snapshot = None
-        if client is not None:
-            await client.__aexit__(None, None, None)
 
     async def __aenter__(self) -> MCPHost:
         return await self.open()
@@ -186,12 +155,31 @@ class MCPHost:
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.close()
 
-    @property
-    def session(self) -> ClientSession:
-        """Retorna a ClientSession conectada do SDK oficial."""
-        if self._client is None:
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[ClientSession]:
+        """Abre e fecha os contextos AnyIO na mesma coroutine que faz a operação.
+
+        Uma falha encerra só este transporte; a próxima operação pode conectar de
+        novo, sem repetir uma reserva cuja resposta pode ter sido perdida.
+        """
+        if not self._opened:
             raise RuntimeError("MCPHost não está aberto")
-        return self._client.session
+        async with streamable_http_client(self.mcp_url) as (read_stream, write_stream):
+            dispatcher = UniqueRequestDispatcher(read_stream, write_stream)
+            async with ClientSession(
+                dispatcher=dispatcher,
+                client_info=CLIENT_INFO,
+                elicitation_callback=self._elicitation_callback,
+            ) as session:
+                # Equivale ao mode fixo do Client oficial, sem handshake legacy.
+                session.adopt(types.DiscoverResult(
+                    supported_versions=[MCP_PROTOCOL_VERSION],
+                    capabilities=types.ServerCapabilities(),
+                    result_type="complete",
+                    ttl_ms=0,
+                    cache_scope="public",
+                ))
+                yield session
 
     async def list_tools_page(
         self,
@@ -202,7 +190,8 @@ class MCPHost:
         """Executa uma página de tools/list com metadados de rastreamento explícitos."""
         meta = build_trace_meta(trace)
         params = types.PaginatedRequestParams(cursor=cursor, _meta=meta)
-        return await self.session.list_tools(params=params)
+        async with self.session() as session:
+            return await session.list_tools(params=params)
 
     async def discover_all_tools(
         self,
@@ -210,10 +199,19 @@ class MCPHost:
         trace: RequestTrace | str | None = None,
     ) -> dict[str, types.Tool]:
         """Percorre todas as páginas de tools/list até nextCursor ausente."""
+        async with self.session() as session:
+            return await self._discover_in_session(session, trace=trace)
+
+    async def _discover_in_session(
+        self, session: ClientSession, *, trace: RequestTrace | str | None,
+    ) -> dict[str, types.Tool]:
+        """Descobre todas as páginas e alimenta o cache de schemas do SDK nesta operação."""
         tools_by_name: dict[str, types.Tool] = {}
         cursor: str | None = None
         for _ in range(MAX_TOOL_LIST_PAGES):
-            page = await self.list_tools_page(cursor=cursor, trace=trace)
+            page = await session.list_tools(params=types.PaginatedRequestParams(
+                cursor=cursor, _meta=build_trace_meta(trace),
+            ))
             for tool in page.tools:
                 tools_by_name[tool.name] = tool
             if page.next_cursor is None:
@@ -229,11 +227,12 @@ class MCPHost:
     ) -> types.ReadResourceResult:
         """Executa resources/read na sessão raw sem auto-responder a elicitation."""
         meta = build_trace_meta(trace)
-        return await self.session.read_resource(
-            uri,
-            meta=meta,
-            allow_input_required=False,
-        )
+        async with self.session() as session:
+            return await session.read_resource(
+                uri,
+                meta=meta,
+                allow_input_required=False,
+            )
 
     async def read_policy_resource(
         self,
@@ -272,31 +271,6 @@ class MCPHost:
         self._snapshot = snapshot
         return snapshot
 
-    async def reopen(self) -> None:
-        """Fecha e abre de novo o cliente HTTP depois de o processo MCP ter sido reiniciado."""
-        await self.close()
-        await self.open()
-
-    async def _call_tool_once(
-        self,
-        name: str,
-        arguments: dict[str, Any] | None,
-        *,
-        trace: RequestTrace | str | None,
-        input_responses: types.InputResponses | None,
-        request_state: str | None,
-    ) -> types.CallToolResult | types.InputRequiredResult:
-        """Uma chamada tools/call. O SDK atribui o id JSON-RPC; os argumentos não são alterados."""
-        meta = build_trace_meta(trace)
-        return await self.session.call_tool(
-            name,
-            arguments,
-            input_responses=input_responses,
-            request_state=request_state,
-            meta=meta,
-            allow_input_required=True,
-        )
-
     async def call_tool_raw(
         self,
         name: str,
@@ -306,31 +280,22 @@ class MCPHost:
         input_responses: types.InputResponses | None = None,
         request_state: str | None = None,
     ) -> types.CallToolResult | types.InputRequiredResult:
-        """Executa tools/call via session.call_tool(..., allow_input_required=True).
+        """Executa uma vez pelo SDK, preservando InputRequiredResult cru.
 
-        Se a conexão cair, reabre o cliente uma vez e repete a mesma chamada, com os
-        mesmos argumentos, input_responses e request_state. Erro JSON-RPC não é repetido.
+        Erros de rede propagam para a Task terminar FAILED. A operação não é
+        repetida: o servidor pode ter criado a reserva antes de perder a resposta.
         """
-        try:
-            return await self._call_tool_once(
+        meta = build_trace_meta(trace)
+        async with self.session() as session:
+            await self._discover_in_session(session, trace=trace)
+            return await session.call_tool(
                 name,
                 arguments,
-                trace=trace,
                 input_responses=input_responses,
                 request_state=request_state,
+                meta=meta,
+                allow_input_required=True,
             )
-        except Exception as exc:
-            if not _is_transport_failure(exc):
-                raise
-        await self.reopen()
-        await self.ensure_discovered(trace=trace)
-        return await self._call_tool_once(
-            name,
-            arguments,
-            trace=trace,
-            input_responses=input_responses,
-            request_state=request_state,
-        )
 
     async def call_discovered_reservation_tool(
         self,

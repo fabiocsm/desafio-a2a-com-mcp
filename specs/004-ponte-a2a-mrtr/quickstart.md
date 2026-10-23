@@ -98,10 +98,15 @@ O handler pausa em `_pause_from_input_required` (`handler.py`, linha 218) e
 retoma em `_resume_task` (linha 244). O retry chama `call_tool_raw` (linha 263)
 com os argumentos originais, a chave original, o token ecoado e o trace da Task.
 Escolha inválida ou Task terminal retornam antes dessa chamada. O id JSON-RPC
-novo é o da sessão do SDK, em `mcp_host.py` `call_tool_raw` (linha 300); o agente
-não reenvia o envelope anterior. Se a conexão HTTP cair, o host reabre o cliente
-uma vez e repete a mesma chamada. Erro JSON-RPC, inclusive estado expirado, não
-é repetido nem renovado.
+novo é fornecido por `UniqueRequestDispatcher` via `CallOptions.request_id`, API
+pública do SDK; o agente não reenvia o envelope anterior nem altera contadores
+internos. Cada operação abre e fecha transporte e sessão oficiais na mesma
+coroutine, sem deixar uma falha de rede inutilizar o host de Tasks futuras.
+Antes de chamar a tool, a sessão descobre todas as páginas com o trace da Task,
+preservando também a validação de outputSchema pelo SDK. Se a conexão cair, a
+Task termina em `FAILED`, limpa sua continuação e não repete a operação: a reserva
+pode ter sido efetivada antes da perda da resposta. Erro JSON-RPC, inclusive
+estado expirado, também não é repetido nem renovado.
 
 ## Evidências desta etapa
 
@@ -216,8 +221,13 @@ Tool 'reservar_sala' failed: 'Error executing tool reservar_sala: Sala inexisten
 A Task `FAILED` preserva a mensagem de domínio no fim do texto. O enunciado
 aceita esse prefixo. Não houve contorno de protocolo.
 
-O id JSON-RPC é atribuído pela sessão. A prova de id novo é o log e o corpo
-capturado no proxy de teste, sem ler contador interno do SDK. O callback de
+O id JSON-RPC usa UUID via a opção pública do dispatcher oficial. A prova de id
+novo é o log e o corpo capturado, sem ler contador interno do SDK. A regressão de
+queda HTTP perde a resposta depois de um efeito observado, exige um único envio,
+confere `FAILED`, limpa os dados privados, consulta `GetTask` e conclui uma nova
+Task após restauração. Outra Task pausada antes da falha retoma com id diferente
+e seu trace original. O teste de restart também conecta agente e MCP diretamente,
+sem proxy, e verifica no stderr ids distintos e o mesmo trace-id. O callback de
 elicitation existe para anunciar `form`; com `allow_input_required=True` o SDK
 devolve `InputRequiredResult` e o callback não roda. Reiniciar o agente perde
 as Tasks em memória; o restart exigido é o do MCP, com a Task ainda no agente.

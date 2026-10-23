@@ -61,7 +61,11 @@ class ObservingMCPHTTPServer:
                 rec = RecordedHTTPRequest(dict(self.headers.items()), payload)
                 with outer._lock:
                     outer.requests.append(rec)
-                status, response_body = outer._responder(rec)
+                try:
+                    status, response_body = outer._responder(rec)
+                except ConnectionResetError:
+                    self.close_connection = True
+                    return
                 encoded = json.dumps(response_body).encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -232,9 +236,9 @@ class TestMCPHostFoundational(unittest.IsolatedAsyncioTestCase):
                 trace=trace,
             )
 
-        self.assertEqual(len(self.server.requests), 3)
-        expected_methods = ["tools/list", "resources/read", "tools/call"]
-        expected_names = [None, "politica://uso", "reservar_sala"]
+        self.assertEqual(len(self.server.requests), 4)
+        expected_methods = ["tools/list", "resources/read", "tools/list", "tools/call"]
+        expected_names = [None, "politica://uso", None, "reservar_sala"]
 
         for req, exp_method, exp_name in zip(self.server.requests, expected_methods, expected_names, strict=True):
             self.assertEqual(req.body.get("method"), exp_method)
@@ -275,7 +279,7 @@ class TestMCPHostFoundational(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(callback_calls, [])
-        self.assertEqual(len(self.server.requests), 1)
+        self.assertEqual([req.body["method"] for req in self.server.requests], ["tools/list", "tools/call"])
         self.assertIsInstance(result, types.InputRequiredResult)
         assert isinstance(result, types.InputRequiredResult)
         self.assertEqual(result.result_type, "input_required")
@@ -302,7 +306,7 @@ class TestMCPHostFoundational(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [req.body.get("method") for req in self.server.requests],
-            ["tools/list", "resources/read", "tools/call"],
+            ["tools/list", "resources/read", "tools/list", "tools/call"],
         )
         for req in self.server.requests:
             with self.subTest(method=req.body.get("method")):
@@ -391,12 +395,12 @@ class TestMCPHostDiscoveryTraceAndBoundaryUS3(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.reservation_tool.name, "reservar_sala")
             self.assertIsInstance(result, types.CallToolResult)
 
-            # Ordem estrita: tools/list (pág 1) -> tools/list (pág 2) -> resources/read -> tools/call
-            self.assertEqual(len(server.requests), 4)
+            # A operação de tool redescobre as páginas para validar seu outputSchema no SDK.
+            self.assertEqual(len(server.requests), 6)
             observed_methods = [r.body.get("method") for r in server.requests]
             self.assertEqual(
                 observed_methods,
-                ["tools/list", "tools/list", "resources/read", "tools/call"],
+                ["tools/list", "tools/list", "resources/read", "tools/list", "tools/list", "tools/call"],
             )
             self.assertIsNone((server.requests[0].body.get("params") or {}).get("cursor"))
             self.assertEqual(
@@ -404,7 +408,7 @@ class TestMCPHostDiscoveryTraceAndBoundaryUS3(unittest.IsolatedAsyncioTestCase):
                 "cursor-pagina-2",
             )
 
-            expected_names = [None, None, "politica://uso", "reservar_sala"]
+            expected_names = [None, None, "politica://uso", None, None, "reservar_sala"]
             for req, exp_method, exp_name in zip(server.requests, observed_methods, expected_names, strict=True):
                 meta = (req.body.get("params") or {}).get("_meta") or {}
                 self.assertEqual(meta.get("io.modelcontextprotocol/protocolVersion"), "2026-07-28")
@@ -576,22 +580,22 @@ class TestMCPHostDiscoveryTraceAndBoundaryUS3(unittest.IsolatedAsyncioTestCase):
                     trace=None,
                 )
 
-            # 1ª operação: tools/list + resources/read + tools/call (todas com trace_a)
-            # 2ª operação: tools/call (com trace_b, reutilizando HostSnapshot de aplicação)
-            # 3ª operação: tools/call (sem traceparent em _meta, sem herdar trace_a nem trace_b)
-            self.assertEqual(len(server.requests), 5)
-            for req in server.requests[:3]:
+            # 1ª operação: catálogo + política + catálogo da sessão + tool (trace_a)
+            # 2ª operação: catálogo da sessão + tool (trace_b, HostSnapshot em cache)
+            # 3ª operação: catálogo da sessão + tool (sem herdar trace_a nem trace_b)
+            self.assertEqual(len(server.requests), 8)
+            for req in server.requests[:4]:
                 meta = (req.body.get("params") or {}).get("_meta") or {}
                 self.assertTrue(
                     str(meta.get("traceparent", "")).startswith("00-11111111111111111111111111111111-")
                 )
 
-            meta_second = (server.requests[3].body.get("params") or {}).get("_meta") or {}
+            meta_second = (server.requests[5].body.get("params") or {}).get("_meta") or {}
             self.assertTrue(
                 str(meta_second.get("traceparent", "")).startswith("00-22222222222222222222222222222222-")
             )
 
-            meta_third = (server.requests[4].body.get("params") or {}).get("_meta") or {}
+            meta_third = (server.requests[7].body.get("params") or {}).get("_meta") or {}
             self.assertNotIn("traceparent", meta_third)
         finally:
             server.stop()

@@ -1001,10 +1001,14 @@ class TestAgenteUS3DescobertaWireTraceparentEStderr(unittest.TestCase):
             methods = [r["json"].get("method") for r in post_reqs]
             self.assertEqual(
                 methods,
-                ["tools/list", "resources/read", "tools/call", "tools/call", "tools/call"],
+                ["tools/list", "resources/read", "tools/list", "tools/call",
+                 "tools/list", "tools/call", "tools/list", "tools/call"],
             )
 
-            expected_names = [None, "politica://uso", "reservar_sala", "reservar_sala", "reservar_sala"]
+            expected_names = [
+                None, "politica://uso", None, "reservar_sala",
+                None, "reservar_sala", None, "reservar_sala",
+            ]
             for req, exp_method, exp_name in zip(post_reqs, methods, expected_names, strict=True):
                 headers_lower = req["headers_lower"]
                 body = req["json"]
@@ -1025,19 +1029,21 @@ class TestAgenteUS3DescobertaWireTraceparentEStderr(unittest.TestCase):
                 self.assertEqual(caps["elicitation"].get("form"), {})
 
             # Conferência de isolamento de traceparent no wire HTTP
-            for req in post_reqs[:3]:
+            for req in post_reqs[:4]:
                 meta = (req["json"].get("params") or {}).get("_meta") or {}
                 self.assertTrue(
                     str(meta.get("traceparent", "")).startswith("00-4bf92f3577b34da6a3ce929d0e0e4736-")
                 )
 
-            meta_task_b = (post_reqs[3]["json"].get("params") or {}).get("_meta") or {}
-            self.assertTrue(
-                str(meta_task_b.get("traceparent", "")).startswith("00-99999999999999999999999999999999-")
-            )
+            for req in post_reqs[4:6]:
+                meta_task_b = (req["json"].get("params") or {}).get("_meta") or {}
+                self.assertTrue(
+                    str(meta_task_b.get("traceparent", "")).startswith("00-99999999999999999999999999999999-")
+                )
 
-            meta_task_none = (post_reqs[4]["json"].get("params") or {}).get("_meta") or {}
-            self.assertNotIn("traceparent", meta_task_none)
+            for req in post_reqs[6:]:
+                meta_task_none = (req["json"].get("params") or {}).get("_meta") or {}
+                self.assertNotIn("traceparent", meta_task_none)
 
             # Conferência do stderr real do servidor MCP: método, id e traceparent registrados
             stderr_text = mcp_proc.read_stderr()

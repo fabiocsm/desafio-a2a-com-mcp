@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import asyncio
 import json
 import secrets
 import threading
@@ -614,6 +615,82 @@ class TestErrosControlados(unittest.IsolatedAsyncioTestCase):
         self.handler = handler
         return tarefa
 
+    async def test_queda_http_na_retomada_falha_sem_replay_e_nova_task_funciona(self) -> None:
+        from test_mcp_host import _default_mcp_responder
+
+        falhar = True
+        efeitos: list[str] = []
+
+        def responder(req: RecordedHTTPRequest) -> tuple[int, dict[str, Any]]:
+            params = req.body.get("params") or {}
+            if req.body.get("method") == "tools/call" and "inputResponses" in params:
+                # Simula resposta perdida depois de o servidor efetivar a operação.
+                efeitos.append(params["requestState"])
+                if falhar:
+                    raise ConnectionResetError("resposta perdida depois da reserva")
+                req = RecordedHTTPRequest(req.raw_headers, {
+                    **req.body, "params": {**params, "arguments": {
+                        **params["arguments"], "sala": params["inputResponses"]["elicit-1"]["content"]["sala"],
+                    }},
+                })
+            return _default_mcp_responder(req)
+
+        server = ObservingMCPHTTPServer(responder)
+        server.start()
+        try:
+            store = TaskStore()
+            async with MCPHost(server.url) as host:
+                handler = AgenteRequestHandler(mcp_host=host, task_store=store)
+                pausada = await handler.on_message_send(
+                    mensagem_reserva(comando_reserva("sala-garagem", instante("14:00"), instante("15:00"), "Marty")),
+                    ServerCallContext(),
+                )
+                assert isinstance(pausada, a2a_pb2.Task)
+                self.assertEqual(pausada.status.state, a2a_pb2.TASK_STATE_INPUT_REQUIRED)
+                outra = await handler.on_message_send(
+                    mensagem_reserva(comando_reserva("sala-garagem", instante("14:00"), instante("15:00"), "Doc")),
+                    ServerCallContext(state={"traceparent": traceparent("1" * 32)}),
+                )
+                assert isinstance(outra, a2a_pb2.Task)
+                # A requisição A2A não é a coroutine que abriu o lifespan do host.
+                final = await asyncio.create_task(handler.on_message_send(
+                    mensagem_reserva("escolha=sala-fusca", task_id=pausada.id), ServerCallContext(),
+                ))
+                assert isinstance(final, a2a_pb2.Task)
+                self.assertEqual(final.status.state, a2a_pb2.TASK_STATE_FAILED)
+                self.assertEqual(final.status.message.parts[0].text, TECHNICAL_MCP_FAILURE_MESSAGE)
+                self.assertEqual(len(efeitos), 1, "uma operação com resposta perdida não pode ser repetida")
+                registro = store.get_record(pausada.id)
+                assert registro is not None
+                self.assertIsNone(registro.pending)
+                self.assertIsNone(registro.raw_input_required)
+                consultada = await handler.on_get_task(a2a_pb2.GetTaskRequest(id=pausada.id), ServerCallContext())
+                assert consultada is not None
+                self.assertEqual(consultada.status.state, a2a_pb2.TASK_STATE_FAILED)
+                self.assertNotIn(efeitos[0], MessageToJson(consultada))
+                falhar = False
+                nova = await asyncio.create_task(handler.on_message_send(
+                    mensagem_reserva(comando_reserva("sala-aquario", instante("09:00"), instante("10:00"), "Doc")),
+                    ServerCallContext(),
+                ))
+                assert isinstance(nova, a2a_pb2.Task)
+                self.assertEqual(nova.status.state, a2a_pb2.TASK_STATE_COMPLETED)
+                self.assertNotEqual(nova.id, pausada.id)
+                self.assertEqual(len(efeitos), 1)
+                retomada = await asyncio.create_task(handler.on_message_send(
+                    mensagem_reserva("escolha=sala-mirante", task_id=outra.id), ServerCallContext(),
+                ))
+                assert isinstance(retomada, a2a_pb2.Task)
+                self.assertEqual(retomada.status.state, a2a_pb2.TASK_STATE_COMPLETED)
+                tool_calls = [req for req in server.requests if req.body.get("method") == "tools/call"]
+                ids = [req.body["id"] for req in tool_calls]
+                self.assertEqual(len(ids), len(set(ids)))
+                self.assertEqual(
+                    tool_calls[-1].body["params"]["_meta"]["traceparent"].split("-")[1], "1" * 32,
+                )
+        finally:
+            server.stop()
+
     async def test_is_error_com_reservado_false_nao_cancela(self) -> None:
         store = TaskStore()
         mensagem = "Erro controlado de retomada"
@@ -1014,6 +1091,43 @@ class TestPonteHTTP(unittest.TestCase):
             self.assertEqual(len(sem_trace), 1)
             self.assertEqual(len(com_trace), 1)
             self.assertNotIn(trace_id, json.dumps(sem_trace[0]["json"]))
+
+    def test_restart_mcp_direto_sem_proxy_preserva_retomada_e_id(self) -> None:
+        import re
+
+        mcp = MCPServerSubprocess()
+        agente: AgenteServerSubprocess | None = None
+        try:
+            mcp.start()
+            agente = AgenteServerSubprocess(mcp_url=mcp.url)
+            agente.start()
+            trace_id = novo_trace_id()
+            _status, resposta, bruto = agente.send_message(
+                comando_reserva("sala-garagem", instante("14:00"), instante("15:00"), "Marty"),
+                traceparent=traceparent(trace_id), req_id="direto-pausa",
+            )
+            pausada = task_de(resposta)
+            self.assertEqual(pausada["status"]["state"], "TASK_STATE_INPUT_REQUIRED", bruto)
+            antes = mcp.read_stderr()
+            id_inicial = re.search(r"method=tools/call id=(\S+)", antes)
+            assert id_inicial is not None
+            mcp.stop()
+            mcp.start()
+            _status, resposta, bruto = agente.send_message(
+                "escolha=sala-fusca", task_id=pausada["id"], req_id="direto-retry",
+            )
+            self.assertEqual(task_de(resposta)["status"]["state"], "TASK_STATE_COMPLETED", bruto)
+            self.assertEqual(artefato_reserva(task_de(resposta))["sala"], "sala-fusca")
+            depois = mcp.read_stderr()
+            id_retry = re.search(r"method=tools/call id=(\S+)", depois)
+            assert id_retry is not None
+            self.assertNotEqual(id_inicial.group(1), id_retry.group(1))
+            self.assertIn(trace_id, depois)
+            self.assertNotIn("requestState", bruto)
+        finally:
+            if agente is not None:
+                agente.stop()
+            mcp.stop()
 
     def test_restart_do_mcp_preserva_retomada(self) -> None:
         trace_id = novo_trace_id()
