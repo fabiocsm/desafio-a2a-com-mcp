@@ -29,7 +29,7 @@ Fork público único: https://github.com/fabiocsm/desafio-a2a-com-mcp, fork de `
 | AC-016 | 002 FR-007 | `ler_segredo_estado` rejeita segredo curto; nenhum segredo no código | passou |
 | AC-017 | 002 FR-013 | validador 19; privacidade `escolha=recusar` | passou |
 | AC-018 | 003 FR-006 | log do rastreamento: `tools/list` `ponte-*` antes do primeiro `tools/call` do agente | passou |
-| AC-019 | 003 FR-010 | trace-id `51e18768e7e2c27340e99282e3a4e142` nos requests `ponte-*` | passou |
+| AC-019 | 003 FR-010 | trace-id `2b0ff92de36eb4517be42136f66e1035` nos requests `ponte-*` do clone | passou |
 | AC-020 | 003 FR-008 | `test_gate_fr008_declara_form_em_cada_request_com_capabilities_adicionais` | passou |
 | AC-021 | 003 FR-002 | validador 21 | passou |
 | AC-022 | 003 FR-002 | validador 22 e 23 | passou |
@@ -47,7 +47,7 @@ Fork público único: https://github.com/fabiocsm/desafio-a2a-com-mcp, fork de `
 | AC-034 | 005 FR-004 | 36 PASS, 0 FAIL, status 0 | passou |
 | AC-035 | 005 FR-011 | `git diff 263f17e -- dados validador exemplos` sem diferença | passou |
 | AC-036 | 003 FR-005; 004 FR-014 | validador 36; `test_dois_pedidos_iguais_pausam_com_o_mesmo_texto`; sem SDK de LLM | passou |
-| AC-037 | 005 FR-001, FR-008, FR-009, FR-010 | README com as quatro seções e a saída integral | passou, reprodução em clone ainda registrada abaixo |
+| AC-037 | 005 FR-001, FR-008, FR-009, FR-010 | README com as quatro seções; clone limpo de `ea0ffd6` reexecutou o validador com status 0 | passou |
 
 ## Inventário FR-001–FR-014 e SC-001–SC-005 da spec 005
 
@@ -70,7 +70,7 @@ Fork público único: https://github.com/fabiocsm/desafio-a2a-com-mcp, fork de `
 | SC-001 | passou na venv limpa com constraints |
 | SC-002 | passou — 36/36 |
 | SC-003 | passou — provas HTTP e suítes isoladas distintas |
-| SC-004 | passou — README fiel à execução `51e18768e7e2c27340e99282e3a4e142` |
+| SC-004 | passou — README fiel à última execução do clone, trace-id `2b0ff92de36eb4517be42136f66e1035` |
 | SC-005 | parcial — fork identificado e protegidos íntegros; a `main` pública ainda não recebeu este commit |
 
 ## Suítes 001–004
@@ -91,10 +91,10 @@ Fork público único: https://github.com/fabiocsm/desafio-a2a-com-mcp, fork de `
 
 ## Validador oficial
 
-- Revisão/estado de código testado, versão Python e versões diretas instaladas: `b4e5e23` mais o working tree de entrega, Python 3.12.12, pins acima.
-- Pré-condições, processos reiniciados e intervalo/sala usados: MCP e agente recém-iniciados em 7301/7300, base inicial de `dados/reservas.json`, `REQUEST_STATE_SECRET` de 32 bytes só no ambiente do MCP.
-- Comando ou cenário de teste e resultado observado: `python3 validador/validar.py --agente http://localhost:7300 --mcp http://localhost:7301`. Status original 0. Saída integral em `docs/evidencias/validador.txt`. Trace-id `51e18768e7e2c27340e99282e3a4e142`. No stderr MCP, o cliente direto do validador usa id hex de 12 caracteres (`tools/call id=12c0b4257404`) e não conta como descoberta do agente. Os requests do agente usam id `ponte-<uuid>`: `tools/list` `ponte-ad03391d-4644-4541-9313-735e4e1cf1a0`, `resources/read` `ponte-e82db4c1-909a-4fb5-8a65-8faab1df59c6`, depois `tools/call` `ponte-49ed37d2-4f34-45ca-8a2d-70fdf845366d` e retry `ponte-020c52ad-cbd3-45eb-b9f1-820f1cdf54a1`, todos com o mesmo trace-id e span-id diferente.
-- Critério de aceite e FR da spec de origem: AC-034, FR-004, FR-005, FR-010; SC-002.
+- Revisão/estado de código testado, versão Python e versões diretas instaladas: clone limpo de `ea0ffd61f33f1efc0919d7d160620ab97c14a6e7`, Python 3.12.12, pins acima. A execução anterior no working tree, trace-id `51e18768e7e2c27340e99282e3a4e142`, também teve 36 PASS e status 0; a saída publicada é a do clone.
+- Pré-condições, processos reiniciados e intervalo/sala usados: no clone `/tmp/ponte-clone-entrega`, venv nova, `pip check` sem quebra, segredo próprio de 32 bytes só no MCP, ambos os processos recém-iniciados, base inicial de `dados/reservas.json`.
+- Comando ou cenário de teste e resultado observado: os comandos de **Como rodar**, terminando em `python3 validador/validar.py --agente http://localhost:7300 --mcp http://localhost:7301`. Status original 0. Saída integral em `docs/evidencias/validador.txt`. Trace-id `2b0ff92de36eb4517be42136f66e1035`. O cliente direto do validador aparece como `tools/call id=b4b9b5831b56` e não comprova descoberta do agente. Os requests do agente são `tools/list` `ponte-47213c07-ec38-42b0-acab-617d1b6b7a71`, `resources/read` `ponte-2a86ad64-e63b-4428-924e-cba9627bb503`, `tools/call` `ponte-4249026e-273d-43d7-ba78-c7153046e51a` e retry `ponte-7672ccc5-22eb-4f46-b9bf-954b8cb5ccd9`, com o mesmo trace-id.
+- Critério de aceite e FR da spec de origem: AC-034, AC-037, FR-001, FR-004, FR-005, FR-010; SC-001, SC-002, SC-004.
 - Passou/falhou com motivo; falha continua pendência, sem marcar sucesso por ressalva: passou. 36 passaram, 0 falharam.
 
 ## Restart só do MCP
@@ -147,4 +147,4 @@ Fork público único: https://github.com/fabiocsm/desafio-a2a-com-mcp, fork de `
 
 ## Pendência
 
-A conferência da `main` pública depois do push ainda não foi feita. O link do fork está identificado. Esta pendência não converte os 36 PASS nem os cenários HTTP em falha; ela bloqueia apenas declarar a publicação concluída.
+A reprodução em clone limpo de `ea0ffd6` passou. A conferência da `main` pública depois do push ainda não foi feita. O link do fork está identificado. Esta pendência não converte os 36 PASS nem os cenários HTTP em falha; ela bloqueia apenas declarar a publicação concluída.

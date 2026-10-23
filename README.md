@@ -76,10 +76,10 @@ Diferenças observadas nos SDKs, sem alteração de protocolo:
 
 ## Saída do validador
 
-Última execução oficial com os dois processos recém-iniciados. Código de saída 0. Trace-id `51e18768e7e2c27340e99282e3a4e142`.
+Última execução oficial com os dois processos recém-iniciados. Código de saída 0. Trace-id `2b0ff92de36eb4517be42136f66e1035`. Revisão `ea0ffd61f33f1efc0919d7d160620ab97c14a6e7`, reproduzida em clone limpo.
 
 ```text
-trace-id desta execucao: 51e18768e7e2c27340e99282e3a4e142
+trace-id desta execucao: 2b0ff92de36eb4517be42136f66e1035
 procure esse valor no stderr do servidor MCP para conferir a propagacao do traceparent.
 
 PASS 01 tools/list traz as tres tools
