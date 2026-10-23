@@ -1,5 +1,12 @@
 # Evidências manuais — conformidade da entrega
 
+A [auditoria de 23/10/2026](auditoria-2026-10-23.md) é a verificação mais recente:
+clone limpo de `8823afe`, 36/36 no validador, 107 testes complementares e cenários
+HTTP adicionais. A saída atual do README e de `validador.txt` é dessa auditoria.
+Os registros abaixo preservam as evidências das rodadas anteriores. A pendência
+de publicação na `main` continua aberta; o fluxo manual exige restaurar a base
+após o validador, como documentado no README.
+
 Baseline do starter: commit `263f17e202fd861d14aa7a5e6a539d13a62857c3` (`initial commit`).
 Revisão funcional dos serviços MCP e A2A exercitada abaixo: `b4e5e23fcc8f80b744cb97885c5bc121e1110ebc`.
 A revisão da spec 005 parte de `8eb0c24`, com as correções do verificador identificadas pelos blobs Git `7d34b467572b96c43a29f4c3224c19b9b00e454a` (`scripts/verificar_entrega.py`) e `37c6557e38359df390ee799845fe9a1efb0e5bc1` (`tests/test_entrega.py`). Essa candidata foi materializada em clone limpo, com venv nova; as edições documentais posteriores transcrevem os resultados. Os serviços e manifests permanecem na revisão funcional acima.

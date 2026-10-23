@@ -3,6 +3,11 @@
 Reserva de salas com um servidor MCP e um agente A2A em processos separados.
 A ponte traduz a pausa MRTR do MCP para uma Task A2A e devolve o `requestState` sem abri-lo.
 
+Esta implementação está na branch `dev`. Na auditoria de 23/10/2026, a `main`
+pública ainda apontava para o starter `263f17e`, sem os serviços. A entrega exigida
+pelo desafio só estará publicada quando a implementação chegar à `main` do
+[fork público](https://github.com/fabiocsm/desafio-a2a-com-mcp).
+
 ## Como rodar
 
 Pré-requisitos: Python 3.12 ou superior para os dois serviços e Python 3.10 ou superior para o validador. Os comandos abaixo usam Python 3.12.
@@ -48,6 +53,74 @@ python3 validador/validar.py --agente http://localhost:7300 --mcp http://localho
 
 O comando termina com código 0 quando as 36 verificações passam. Reinicie os dois processos antes de cada nova rodada oficial, para restaurar as reservas iniciais. Para o teste de retomada, reinicie somente o MCP com a mesma `REQUEST_STATE_SECRET` e o mesmo nome `ponte-salas`.
 
+Para continuar pelo fluxo manual do avaliador, **reinicie o MCP depois do
+validador e antes do passo 7**, usando novamente `python -m ponte_mcp` no primeiro
+terminal, com a mesma chave exportada. O validador cria reservas: ao terminar,
+fusca e mirante já estão ocupadas em 03/11/2026 das 14h às 15h. Sem esse reinício,
+o pedido da garagem retorna `Sem alternativas disponiveis no intervalo`, em vez
+da pausa esperada. O agente pode continuar ativo; as Tasks existentes permanecem
+consultáveis. Não reinicie o MCP entre a pausa e a escolha, exceto no teste
+específico de retomada após restart.
+
+Nos exemplos de `exemplos/wire/`, envie somente `request.body` como corpo do POST,
+com os headers de `request.headers`. O arquivo inteiro inclui descrição e resposta
+esperada, que não fazem parte do request. Em uma base recém-iniciada, o pedido do
+exemplo 08 deve listar `alternativas: sala-fusca, sala-mirante`. Use o `taskId`
+real recebido ao continuar com `escolha=sala-mirante` e ao consultar `GetTask`.
+Depois do aceite, um novo pedido pode oferecer menos alternativas, pois a reserva
+confirmada continua ocupando a sala. Uma nova Task ainda pode recusar com
+`escolha=recusar` enquanto houver alternativa.
+
+Verificações adicionais disponíveis, cada caso com MCP e agente recém-iniciados:
+
+```bash
+python scripts/verificar_entrega.py --caso privacidade
+```
+
+Esse caso verifica reserva direta, pausa, escolha inválida, duas Tasks retomadas
+em ordem inversa, recusa, erro de domínio, consulta dos artifacts, rejeição nos três
+estados terminais e ausência de estado privado nas respostas A2A. Para conferir
+descoberta, propagação de trace-id e ids distintos no retry, suba uma base nova e
+capture o stderr MCP no primeiro terminal:
+
+```bash
+python -m ponte_mcp 2> >(tee /tmp/ponte-mcp.stderr.log >&2)
+```
+
+No terceiro terminal, com o agente também recém-iniciado:
+
+```bash
+python scripts/verificar_entrega.py --caso rastreamento --log-mcp /tmp/ponte-mcp.stderr.log
+```
+
+Para provar a retomada após restart, comece com outra base nova e execute no
+terceiro terminal:
+
+```bash
+ponte_state_file=$(mktemp /tmp/ponte-estado-XXXXXXXX)
+trap 'rm -f "$ponte_state_file"' EXIT
+python scripts/verificar_entrega.py --caso reinicio-mcp --fase emitir --estado "$ponte_state_file"
+```
+
+Reinicie **somente o MCP** no primeiro terminal, preservando a chave e mantendo o
+agente ativo. Em menos de 600 segundos, no mesmo terceiro terminal:
+
+```bash
+python scripts/verificar_entrega.py --caso reinicio-mcp --fase retomar --estado "$ponte_state_file"
+rm -f "$ponte_state_file"
+```
+
+O arquivo temporário guarda o token opaco fora do repositório. As suítes abaixo
+complementam os testes HTTP com adulteração e expiração do estado, argumentos
+divergentes, capability ausente e headers incompatíveis. Elas iniciam seus próprios
+processos em portas temporárias:
+
+```bash
+python -m unittest discover -s servidor-mcp/tests -v
+python -m unittest discover -s agente/tests -v
+python -m unittest discover -s tests -v
+```
+
 ## Onde a ponte acontece
 
 O agente recebe o `InputRequiredResult` cru e só então publica a pausa.
@@ -76,10 +149,15 @@ Diferenças observadas nos SDKs, sem alteração de protocolo:
 
 ## Saída do validador
 
-Última execução oficial com os dois processos recém-iniciados em clone limpo da candidata de revisão sobre `8eb0c24`. Código de saída 0. Trace-id `150aa5b32ab88f47b54cf0f264e94daf`. A revisão dos arquivos executados está identificada em [evidências manuais](docs/evidencias/manual.md).
+Última execução oficial em 23/10/2026, com os dois processos recém-iniciados em
+clone limpo de `8823afe`, venv nova e instalação pelos comandos acima. Código de
+saída 0. Trace-id `895c54080dba05c0872abf9caddff073`. Esta revisão altera somente a
+documentação; os serviços, manifests e constraints são os da revisão testada.
+A [auditoria de conformidade](docs/evidencias/auditoria-2026-10-23.md) registra o
+fluxo manual, os testes complementares e a pendência de publicação na `main`.
 
 ```text
-trace-id desta execucao: 150aa5b32ab88f47b54cf0f264e94daf
+trace-id desta execucao: 895c54080dba05c0872abf9caddff073
 procure esse valor no stderr do servidor MCP para conferir a propagacao do traceparent.
 
 PASS 01 tools/list traz as tres tools
