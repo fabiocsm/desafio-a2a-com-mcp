@@ -3,11 +3,6 @@
 Reserva de salas com um servidor MCP e um agente A2A em processos separados.
 A ponte traduz a pausa MRTR do MCP para uma Task A2A e devolve o `requestState` sem abri-lo.
 
-Esta implementação está na branch `dev`. Na auditoria de 23/10/2026, a `main`
-pública ainda apontava para o starter `263f17e`, sem os serviços. A entrega exigida
-pelo desafio só estará publicada quando a implementação chegar à `main` do
-[fork público](https://github.com/fabiocsm/desafio-a2a-com-mcp).
-
 ## Como rodar
 
 Pré-requisitos: Python 3.12 ou superior para os dois serviços e Python 3.10 ou superior para o validador. Os comandos abaixo usam Python 3.12.
