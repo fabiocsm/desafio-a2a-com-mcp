@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ponte-mcp"
+version = "0.1.0"
+description = "Servidor MCP de salas e reservas diretas para o desafio A Ponte"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp==2.3.0",
+    "starlette==0.48.0",
+    "uvicorn==0.31.1",
+    "sse-starlette==3.0.3",
+    "pydantic==2.12.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ponte_mcp"]
