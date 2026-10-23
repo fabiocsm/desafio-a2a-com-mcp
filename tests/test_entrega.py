@@ -6,6 +6,7 @@ de protocolo executadas contra processos reais.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from email.message import Message
 import importlib.util
@@ -375,6 +376,167 @@ class TestSuporteHttpDaEntrega(unittest.TestCase):
         resumo = self.mod.avaliar_rastreamento(linhas, trace)
         self.assertEqual(resumo["ids_tools_call"], ["a3", "a5"])
         self.assertTrue(resumo["descoberta_antes"])
+
+
+class TestProvasA2aDaEntrega(unittest.TestCase):
+    """Respostas públicas adversariais não podem aprovar as provas HTTP."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.mod = carregar_verificador()
+
+    def task(self, nome, estado="COMPLETED", sala="sala-fusca", responsavel="Doc", hora=14):
+        dados = {
+            "reserva": "res-" + nome, "reservado": True, "sala": sala,
+            "responsavel": responsavel, "inicio": f"2026-11-03T{hora}:00:00-03:00",
+            "fim": f"2026-11-03T{hora + 1}:00:00-03:00", "politica": "2026-11-01",
+        }
+        task = {"id": nome, "contextId": "ctx-" + nome, "status": {"state": "TASK_STATE_" + estado}}
+        if estado == "COMPLETED":
+            task["artifacts"] = [{"name": "reserva", "parts": [{"text": json.dumps(dados)}]}]
+        elif estado == "INPUT_REQUIRED":
+            salas = "sala-garagem, sala-mirante" if nome == "b" else "sala-fusca, sala-mirante"
+            task["status"]["message"] = {"parts": [{"text": "alternativas: " + salas}]}
+        elif estado == "FAILED":
+            task["history"] = [{"parts": [{"text": "Sala inexistente: sala-delorean"}]}]
+        return task
+
+    def privacidade(self, mutacao=None):
+        completas = {"a": self.task("a"), "b": self.task("b", sala="sala-garagem", responsavel="Biff", hora=16)}
+        direta = self.task("direta")
+        cancelada = self.task("recusa", "CANCELED")
+        falha = self.task("falha", "FAILED")
+        consultas = {**completas, "direta": direta, "recusa": cancelada, "falha": falha}
+        envios = iter([
+            ("pausa-a", self.task("a", "INPUT_REQUIRED")),
+            ("invalida", self.task("a", "INPUT_REQUIRED")),
+            ("pausa-b", self.task("b", "INPUT_REQUIRED")),
+            ("aceite-b", completas["b"]), ("aceite-a", completas["a"]),
+            ("direta", direta), ("pre-recusa", self.task("recusa", "INPUT_REQUIRED")),
+            ("recusa", cancelada), ("falha", falha),
+        ])
+        cliente = mock.Mock(timeout=1)
+
+        def post(url, body, headers):
+            if body["method"] == "GetTask":
+                rotulo = "get-" + body["params"]["id"]
+                parsed = {"result": {"task": deepcopy(consultas[body["params"]["id"]])}}
+            else:
+                try:
+                    rotulo, task = next(envios)
+                    parsed = {"result": {"task": deepcopy(task)}}
+                except StopIteration:
+                    rotulo, parsed = "terminal", {"error": {"code": -32602}}
+            if mutacao:
+                mutacao(rotulo, parsed)
+            return 200, parsed, json.dumps(parsed)
+
+        cliente.post.side_effect = post
+        with mock.patch.object(self.mod, "_get", return_value=(200, {})), \
+             mock.patch.object(self.mod, "versao_politica", return_value="2026-11-01"), \
+             mock.patch.object(self.mod, "sala_livre", return_value=True), \
+             mock.patch("sys.stdout", io.StringIO()):
+            self.mod.executar_privacidade(cliente, "http://agente", "http://mcp/mcp")
+        return cliente
+
+    def test_privacidade_legitima_consulta_as_duas_tasks_retomadas(self):
+        cliente = self.privacidade()
+        ids = [call.args[1]["params"]["id"] for call in cliente.post.call_args_list if call.args[1]["method"] == "GetTask"]
+        self.assertIn("a", ids)
+        self.assertIn("b", ids)
+
+    def test_privacidade_rejeita_vazamentos_no_envelope_e_texto_json(self):
+        for local in ("envelope", "result", "artifact", "erro"):
+            with self.subTest(local=local):
+                def vazar(rotulo, parsed):
+                    if rotulo == "terminal" and local == "erro":
+                        parsed["error"]["data"] = {"requestState": "SENTINELA-PRIVADA"}
+                    elif rotulo == "aceite-b":
+                        if local == "envelope":
+                            parsed["requestState"] = "SENTINELA-PRIVADA"
+                        elif local == "result":
+                            parsed["result"]["requestState"] = "SENTINELA-PRIVADA"
+                        elif local == "artifact":
+                            part = parsed["result"]["task"]["artifacts"][0]["parts"][0]
+                            dados = json.loads(part["text"])
+                            dados["requestState"] = "SENTINELA-PRIVADA"
+                            part["text"] = json.dumps(dados)
+                with self.assertRaisesRegex(self.mod.EntregaFalha, "estrutura privada") as ctx:
+                    self.privacidade(vazar)
+                self.assertNotIn("SENTINELA-PRIVADA", str(ctx.exception))
+
+    def test_privacidade_http_error_tambem_varre_erro(self):
+        for status, vaza in ((400, False), (500, False), (400, True), (500, True)):
+            with self.subTest(status=status, vaza=vaza):
+                parsed = {"error": {"code": -32602 if status == 400 else -32603}}
+                if vaza:
+                    parsed["error"]["data"] = {"requestState": "SENTINELA-PRIVADA"}
+                cliente = mock.Mock()
+                cliente.post.side_effect = self.mod.ErroHttpJsonRpc("http://agente/a2a", status, parsed, json.dumps(parsed))
+                if vaza:
+                    with self.assertRaisesRegex(self.mod.EntregaFalha, "estrutura privada") as ctx:
+                        self.mod.rejeita_terminal(cliente, "http://agente", "a")
+                    self.assertNotIn("SENTINELA-PRIVADA", str(ctx.exception))
+                else:
+                    with self.assertRaises(self.mod.ErroHttpJsonRpc):
+                        self.mod.rejeita_terminal(cliente, "http://agente", "a")
+
+    def test_isolamento_rejeita_identidade_contexto_e_fim_trocados(self):
+        for local in ("id-duplicado", "id-trocado", "contextId", "fim", "get-id", "get-contextId", "get-fim"):
+            with self.subTest(local=local):
+                def trocar(rotulo, parsed):
+                    if rotulo == ("get-b" if local.startswith("get-") else "aceite-b"):
+                        task = parsed["result"]["task"]
+                        campo = local.removeprefix("get-")
+                        if campo in ("id", "id-duplicado", "id-trocado"):
+                            task["id"] = "a"
+                        elif campo == "contextId":
+                            task["contextId"] = "ctx-a"
+                        else:
+                            part = task["artifacts"][0]["parts"][0]
+                            dados = json.loads(part["text"])
+                            dados["fim"] = "2026-11-03T18:00:00-03:00"
+                            part["text"] = json.dumps(dados)
+                    elif local == "id-trocado" and rotulo == "aceite-a":
+                        parsed["result"]["task"]["id"] = "b"
+                with self.assertRaises(self.mod.EntregaFalha):
+                    self.privacidade(trocar)
+
+    def test_rastreamento_rejeita_request_extra_sem_trace_ou_divergente(self):
+        trace = "ab" * 16
+        base = f"00-{trace}-{'cd' * 8}-01"
+        validas = [f"[mcp] method={method} id=ponte-{i} traceparent={base}" for i, method in enumerate(("tools/list", "resources/read", "tools/call", "tools/call"))]
+        for sufixo in ("", f" traceparent=00-{'ef' * 16}-{'cd' * 8}-01"):
+            with self.subTest(sufixo=sufixo):
+                with self.assertRaises(self.mod.EntregaFalha):
+                    self.mod.avaliar_rastreamento(validas[:3] + ["[mcp] method=tools/list id=ponte-extra" + sufixo] + validas[3:], trace)
+
+    def test_rastreamento_exige_retomada_completa_e_identidade_reserva(self):
+        trace = "ab" * 16
+        base = f"00-{trace}-{'cd' * 8}-01"
+        linhas = "\n".join(f"[mcp] method={method} id=ponte-{i} traceparent={base}" for i, method in enumerate(("tools/list", "resources/read", "tools/call", "tools/call")))
+        for defeito in (None, "estado", "id", "contextId", "sala", "fim", "responsavel"):
+            with self.subTest(defeito=defeito):
+                pausa = self.task("trace", "INPUT_REQUIRED")
+                retomada = self.task("trace", responsavel="Trace")
+                if defeito == "estado":
+                    retomada["status"]["state"] = "TASK_STATE_FAILED"
+                elif defeito in ("id", "contextId"):
+                    retomada[defeito] = "outra"
+                elif defeito:
+                    part = retomada["artifacts"][0]["parts"][0]
+                    dados = json.loads(part["text"])
+                    dados[defeito] = "outro"
+                    part["text"] = json.dumps(dados)
+                cliente = _ClienteFalso([(200, {"result": {"task": task}}, "{}") for task in (pausa, retomada)])
+                arquivo = mock.mock_open()
+                arquivo.return_value.read.side_effect = ["", linhas]
+                with mock.patch("builtins.open", arquivo), mock.patch.object(self.mod, "_traceparent_exclusivo", return_value=(trace, base)), mock.patch("sys.stdout", io.StringIO()):
+                    if defeito:
+                        with self.assertRaises(self.mod.EntregaFalha):
+                            self.mod.executar_rastreamento(cliente, "http://agente", "log")
+                    else:
+                        self.mod.executar_rastreamento(cliente, "http://agente", "log")
 
 
 class _ClienteFalso:

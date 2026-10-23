@@ -346,10 +346,13 @@ def avaliar_rastreamento(linhas: list[str], trace_id: str) -> dict[str, Any]:
             continue
         traceparent = match.group("traceparent") or ""
         partes = traceparent.split("-")
-        if len(partes) < 2 or partes[1].lower() != trace_id.lower():
+        trace_esperado = len(partes) == 4 and partes[1].lower() == trace_id.lower()
+        # O log é exclusivo deste cenário; ponte-* identifica também requests
+        # do agente que perderam o trace e não podem desaparecer do gate.
+        if not match.group("id").startswith("ponte-") and not trace_esperado:
             continue
-        if not match.group("method") or not match.group("id") or not traceparent:
-            raise EntregaFalha("request observado sem metodo, id ou traceparent")
+        if not trace_esperado:
+            raise EntregaFalha("request do agente sem o trace-id A2A esperado")
         eventos.append(
             {
                 "method": match.group("method"),
@@ -407,7 +410,16 @@ def enviar_a2a(
     if traceparent:
         headers["traceparent"] = traceparent
     corpo = {"jsonrpc": "2.0", "id": _novo_id("a2a"), "method": method, "params": params}
-    _status, parsed, raw = cliente.post(f"{base.rstrip('/')}/a2a", corpo, headers)
+    try:
+        _status, parsed, raw = cliente.post(f"{base.rstrip('/')}/a2a", corpo, headers)
+    except ErroHttpJsonRpc as err:
+        # Erros HTTP também são respostas públicas. Inspecione o corpo sem
+        # transformar uma falha de transporte em prova de terminalidade.
+        if chaves_privadas(err.parsed):
+            raise EntregaFalha("estrutura privada em resposta A2A") from None
+        raise
+    if chaves_privadas(parsed):
+        raise EntregaFalha("estrutura privada em resposta A2A")
     return parsed, raw
 
 
@@ -457,6 +469,13 @@ def chaves_privadas(valor: Any, prefixo: str = "") -> list[str]:
     elif isinstance(valor, list):
         for indice, item in enumerate(valor):
             achados.extend(chaves_privadas(item, f"{prefixo}[{indice}]"))
+    elif isinstance(valor, str) and valor.lstrip().startswith(("{", "[")):
+        try:
+            embutido = json.loads(valor)
+        except json.JSONDecodeError:
+            pass
+        else:
+            achados.extend(chaves_privadas(embutido, prefixo))
     return achados
 
 
@@ -523,7 +542,27 @@ def sala_livre(cliente: Any, mcp_url: str, sala: str, inicio: str, fim: str) -> 
 def _varrer(rotulo: str, payload: Any, acumulado: list[str]) -> None:
     achados = chaves_privadas(payload)
     if achados:
-        acumulado.append(f"{rotulo}: {', '.join(achados)}")
+        acumulado.append(rotulo)
+
+
+def conferir_reserva(
+    task: dict[str, Any],
+    original: dict[str, Any],
+    pedido: dict[str, str],
+    sala: str,
+    politica: str | None = None,
+) -> None:
+    for campo in ("id", "contextId"):
+        if not original.get(campo) or task.get(campo) != original[campo]:
+            raise EntregaFalha("aceite trocou a identidade ou contexto da task")
+    if estado_task(task) != "TASK_STATE_COMPLETED":
+        raise EntregaFalha("aceite nao concluiu")
+    dados = artifact_reserva(task)
+    esperado = {**pedido, "sala": sala}
+    if any(dados.get(campo) != esperado[campo] for campo in CAMPOS_PEDIDO):
+        raise EntregaFalha("aceite misturou sala, responsavel ou intervalo")
+    if politica is not None and dados.get("politica") != politica:
+        raise EntregaFalha("politica do artifact difere da versao do resource")
 
 
 def executar_rastreamento(cliente: Any, base: str, log_path: str) -> None:
@@ -544,7 +583,8 @@ def executar_rastreamento(cliente: Any, base: str, log_path: str) -> None:
     if not linha.startswith("alternativas: "):
         raise EntregaFalha("pausa sem lista de alternativas")
     alternativa = linha.removeprefix("alternativas: ").split(",")[0].strip()
-    reservar(cliente, base, f"escolha={alternativa}", task_id=task["id"], traceparent=traceparent)
+    retomada = reservar(cliente, base, f"escolha={alternativa}", task_id=task["id"], traceparent=traceparent)
+    conferir_reserva(retomada, task, {**PEDIDO_CONFLITO, "responsavel": "Trace"}, alternativa)
     with open(log_path, encoding="utf-8", errors="replace") as handle:
         depois = handle.read()
     novas = depois[len(antes):] if depois.startswith(antes) else depois
@@ -599,19 +639,16 @@ def executar_privacidade(cliente: Any, base: str, mcp_url: str) -> None:
     _varrer("aceite-b", aceite_b, vazamentos)
     aceite_a = reservar(cliente, base, "escolha=sala-fusca", task_id=pausa_a["id"])
     _varrer("aceite-a", aceite_a, vazamentos)
-    for task, sala, responsavel, inicio in (
-        (aceite_b, "sala-garagem", "Biff", "2026-11-03T16:00:00-03:00"),
-        (aceite_a, "sala-fusca", "Doc", "2026-11-03T14:00:00-03:00"),
+    for task, original, sala, responsavel, inicio, fim in (
+        (aceite_b, pausa_b, "sala-garagem", "Biff", "2026-11-03T16:00:00-03:00", "2026-11-03T17:00:00-03:00"),
+        (aceite_a, pausa_a, "sala-fusca", "Doc", "2026-11-03T14:00:00-03:00", "2026-11-03T15:00:00-03:00"),
     ):
-        if task["id"] not in {pausa_a["id"], pausa_b["id"]}:
-            raise EntregaFalha("aceite trocou a identidade da task")
-        if estado_task(task) != "TASK_STATE_COMPLETED":
-            raise EntregaFalha("aceite nao concluiu")
-        dados = artifact_reserva(task)
-        if dados.get("sala") != sala or dados.get("responsavel") != responsavel or dados.get("inicio") != inicio:
-            raise EntregaFalha("aceite misturou sala, responsavel ou intervalo")
-        if dados.get("politica") != politica:
-            raise EntregaFalha("politica do artifact difere da versao do resource")
+        pedido = {"sala": sala, "responsavel": responsavel, "inicio": inicio, "fim": fim}
+        conferir_reserva(task, original, pedido, sala, politica)
+        consultada = consultar_task(cliente, base, original["id"])
+        conferir_reserva(consultada, original, pedido, sala, politica)
+        if artifact_reserva(consultada) != artifact_reserva(task):
+            raise EntregaFalha("GetTask alterou a reserva da task retomada")
 
     direta = reservar(
         cliente,
